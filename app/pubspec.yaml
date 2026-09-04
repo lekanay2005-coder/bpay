@@ -3,14 +3,16 @@ description: >
   PayFlex — mobile-first microfinance app built on the BMONI Embedded API.
   Phase 1: user creation + on-device owner wallet + managed smart wallet
   provisioning. Phase 2: KYC wizard, NGN/USD rail onboarding, wallet home
-  balances/history — all end to end against the PayFlex orchestration
-  backend.
+  balances/history. Phase 3: transfers, QR Pay, PayTag — all end to end
+  against the PayFlex orchestration backend.
 publish_to: 'none'
 version: 0.1.0
 
 environment:
   sdk: '^3.9.0'
-  flutter: '>=3.3.0'
+  # mobile_scanner 7.x (Phase 3) needs >=3.29.0 — kept in sync here rather
+  # than leaving a lower bound none of our own dependencies actually allow.
+  flutter: '>=3.29.0'
 
 dependencies:
   flutter:
@@ -25,6 +27,9 @@ dependencies:
   cupertino_icons: ^1.0.8
   # Camera/gallery capture for KYC document + selfie upload (Phase 2).
   image_picker: ^1.1.2
+  # QR Pay (Phase 3): render a payment QR and scan one to pay.
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^7.4.0
 
 dev_dependencies:
   flutter_test:

@@ -46,21 +46,66 @@ export const BmoniPaths = {
   walletDetail: (userId: string, smartWalletId: string) =>
     `/v1/users/${userId}/smart-wallets/${smartWalletId}`,
   depositWalletAddress: (userId: string) => `/v1/users/${userId}/deposit/wallet`,
-  vbaNgn: (userId: string) => `/v1/users/${userId}/vba/ngn`,
-  vbaEu: (userId: string) => `/v1/users/${userId}/vba/eu`,
-  verifyNigerianAccount: () => `/v1/bank-accounts/verify-nigerian-account`,
-  withdrawalAccountsNigeria: () => `/v1/bank-accounts/withdrawal-accounts/nigeria`,
-  offrampNigeria: (smartWalletId: string) =>
-    `/v1/smart-wallets/${smartWalletId}/offramp/nigeria`,
+  depositSupportedAssets: () => `/v1/deposit/supported-assets`,
+
+  /**
+   * Confirmed against BMONI's own OpenAPI spec (GET /docs/openapi.json on
+   * the sandbox host) on 2026-09-04 — the brief's `/vba/ngn` and `/vba/eu`
+   * do not exist. The real onramp-VBA endpoints are nested under a
+   * specific smart wallet, not top-level.
+   */
+  onrampVbaNigeria: (userId: string, smartWalletId: string) =>
+    `/v1/users/${userId}/smart-wallets/${smartWalletId}/onramp/vba/nigeria`,
+  onrampVbaEu: (userId: string, smartWalletId: string) =>
+    `/v1/users/${userId}/smart-wallets/${smartWalletId}/onramp/vba/eu`,
+
+  // Confirmed live: needs the /v1/users/{userId} prefix the brief omits.
+  nigerianBanks: (userId: string) => `/v1/users/${userId}/bank-accounts/nigerian-banks`,
+  verifyNigerianAccount: (userId: string) =>
+    `/v1/users/${userId}/bank-accounts/verify-nigerian-account`,
+  withdrawalAccountsNigeria: (userId: string) =>
+    `/v1/users/${userId}/bank-accounts/withdrawal-accounts/nigeria`,
+  offrampNigeria: (userId: string, smartWalletId: string) =>
+    `/v1/users/${userId}/smart-wallets/${smartWalletId}/offramp/nigeria`,
+  /**
+   * The simpler one-call NGN withdrawal path (confirmed live): creates the
+   * offramp proposal, auto-approves it, and returns the sign payload in
+   * one round trip, vs. offrampNigeria's separate
+   * create-proposal -> sign-payload -> sign sequence.
+   */
+  withdrawalWalletNigeria: (userId: string) => `/v1/users/${userId}/withdrawal/wallet/nigeria`,
+
   payoutsValidateAccount: (userId: string) => `/v1/users/${userId}/payouts/validate-account`,
   payouts: (userId: string) => `/v1/users/${userId}/payouts`,
-  exchangeRate: (from: string, to: string) => `/v1/exchange/rate/${from}/${to}`,
+  exchangeRate: (userId: string, from: string, to: string) =>
+    `/v1/users/${userId}/exchange/rate/${from}/${to}`,
   exchangeConvert: (userId: string) => `/v1/users/${userId}/exchange/convert`,
-  createProposal: (smartWalletId: string) => `/v1/smart-wallets/${smartWalletId}/proposals`,
-  rejectProposal: (proposalId: string) => `/v1/proposals/${proposalId}/reject`,
-  approveProposal: (proposalId: string) => `/v1/proposals/${proposalId}/approve`,
-  proposalSignPayload: (proposalId: string) => `/v1/proposals/${proposalId}/sign-payload`,
-  signProposal: (proposalId: string) => `/v1/proposals/${proposalId}/sign`,
+
+  /**
+   * Proposal endpoints confirmed against BMONI's own OpenAPI spec AND live
+   * testing on 2026-09-04 — several diverge from the brief:
+   *  - createProposal/listProposals DO need the /v1/users/{userId} prefix
+   *    the brief omits.
+   *  - There is no separate "approve" endpoint at all, despite the brief
+   *    (and even BMONI's own endpoint descriptions) mentioning one —
+   *    reject/sign/sign-payload/get are the only proposal-mutation routes
+   *    that exist. Signing IS the approval action.
+   *  - reject/sign/sign-payload/get are addressed by proposalId alone,
+   *    NOT nested under a specific smartWalletId.
+   */
+  createProposal: (userId: string, smartWalletId: string) =>
+    `/v1/users/${userId}/smart-wallets/${smartWalletId}/proposals`,
+  listProposals: (userId: string, smartWalletId: string) =>
+    `/v1/users/${userId}/smart-wallets/${smartWalletId}/proposals`,
+  getProposal: (userId: string, proposalId: string) =>
+    `/v1/users/${userId}/smart-wallets/proposals/${proposalId}`,
+  rejectProposal: (userId: string, proposalId: string) =>
+    `/v1/users/${userId}/smart-wallets/proposals/${proposalId}/reject`,
+  proposalSignPayload: (userId: string, proposalId: string) =>
+    `/v1/users/${userId}/smart-wallets/proposals/${proposalId}/sign-payload`,
+  signProposal: (userId: string, proposalId: string) =>
+    `/v1/users/${userId}/smart-wallets/proposals/${proposalId}/sign`,
+
   transactions: (userId: string, smartWalletId: string) =>
     `/v1/users/${userId}/transactions/${smartWalletId}`,
 } as const;

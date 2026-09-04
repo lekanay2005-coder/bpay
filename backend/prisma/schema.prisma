@@ -34,10 +34,12 @@ model AppUser {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  smartWallets    SmartWallet[]
-  webhookEvents   WebhookEvent[]
-  kycProfile      KycProfile?
-  railOnboardings RailOnboarding[]
+  smartWallets      SmartWallet[]
+  webhookEvents     WebhookEvent[]
+  kycProfile        KycProfile?
+  railOnboardings   RailOnboarding[]
+  payTag            PayTag?
+  transferProposals TransferProposal[]
 }
 
 model SmartWallet {
@@ -118,4 +120,39 @@ model RailOnboarding {
   updatedAt DateTime @updatedAt
 
   @@unique([appUserId, currency])
+}
+
+// PayFlex's own @handle -> user directory. BMONI has no equivalent
+// primitive (see build brief section 3) — every transfer that targets a
+// PayTag resolves it to a bmoniUserId here first, then runs the normal
+// TransferService flow.
+model PayTag {
+  id        String   @id @default(uuid())
+  tag       String   @unique
+  appUserId String   @unique
+  appUser   AppUser  @relation(fields: [appUserId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+// Local mirror of a BMONI smart-wallet TRANSFER proposal. BMONI is the
+// source of truth for proposal state (see TransferService.getProposal) —
+// this table exists so the app can list "my transfers" without listing
+// proposals per wallet on every screen, and so QR/PayTag/future
+// split-bill flows have a local row to attach their own metadata to
+// (e.g. which QR token produced this transfer).
+model TransferProposal {
+  id              String  @id @default(uuid())
+  appUserId       String
+  appUser         AppUser @relation(fields: [appUserId], references: [id])
+  bmoniProposalId String  @unique
+  smartWalletId   String
+  toBmoniUserId   String?
+  toAddress       String?
+  amount          String
+  currency        String
+  status          String
+  nextAction      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

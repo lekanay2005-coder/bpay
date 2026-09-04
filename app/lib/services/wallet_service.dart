@@ -31,4 +31,17 @@ class WalletService {
   /// gets submitted back to the backend as `ownerProofSignature`.
   static Future<String> signChallenge(String message, String pin) =>
       BmoniEmbeddedSdk.signMessage(message, pin: pin);
+
+  /// Signs a pre-computed 32-byte digest directly — no prefix, no
+  /// additional hashing. This is what a BMONI transfer proposal's
+  /// `signingPayloadHash` (from GET sign-payload) needs: confirmed live
+  /// against the sandbox that BMONI wants a raw ECDSA signature over that
+  /// exact hash, NOT the EIP-712 hash of the `typedData` object it's
+  /// packaged alongside — signing the properly-computed EIP-712 digest
+  /// was tested and rejected ("signature does not match your registered
+  /// owner address"). See backend/README.md "Phase 3 findings" for the
+  /// full story. Do not run `digestHex` through any additional hashing
+  /// before calling this.
+  static Future<String> signDigest(String digestHex, String pin) =>
+      BmoniEmbeddedSdk.signTransactionHash(digestHex, pin: pin);
 }

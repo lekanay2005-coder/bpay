@@ -54,7 +54,10 @@ transfer primitive above):
   not a shortcut — treat any escrow balance as PayFlex-held customer
   funds, not BMONI-custodied funds, when this ships (Phase 5).
 - **PayTag directory** (`@handle` → `bmoniUserId`) — our own Postgres
-  table, resolved before every transfer that uses it.
+  table, resolved before every transfer that uses it. **Done** (Phase 3).
+- **QR Pay** — a short-lived, HMAC-signed QR payload naming a
+  recipient/amount/currency; scanning hands off to the same transfer
+  primitive below. **Done** (Phase 3).
 - **Split-bill orchestration** — BMONI has no group-payment primitive;
   it's independent per-contributor proposals tracked in our own table.
 
@@ -64,7 +67,7 @@ transfer primitive above):
 |---|---|
 | 1 — Foundation (user + owner wallet + managed smart wallet) | **Done, verified against the live sandbox** — see `backend/README.md` |
 | 2 — KYC + onboarding (NGN, USD) | **Done for NGN, verified against the live sandbox; USD wired but blocked on a real device camera** — see below |
-| 3 — Transfers (QR, PayTag, deposits, NGN withdrawal) | Not started |
+| 3 — Transfers (QR, PayTag, deposits, NGN withdrawal) | **Transfers/QR/PayTag done, verified against the live sandbox; deposits and NGN withdrawal wired but blocked on sandbox limitations** — see below |
 | 4 — Microfinance layer (savings, loans, agent mode) | Not started |
 | 5 — Polish (split-bill, send-via-link/escrow, CAD/EUR/MXN stubs) | Not started |
 
@@ -91,11 +94,34 @@ rejected by `start-nigeria` in three separate live test runs, contradicting
 the build brief's description of that check — see `backend/README.md`
 "Phase 2 findings" before treating that endpoint as a compliance control.
 
-The Flutter app is scaffolded and wired for both phases, written against
-the real `bmoni_embedded_sdk` v0.0.2 API (inspected from its pub.dev
-package, not guessed) and the backend's confirmed-live HTTP contract, but
-**has not been run** — this environment has no Flutter/Dart SDK installed.
-See `app/README.md`.
+Phase 3's transfer primitive (create proposal → sign-payload → sign),
+QR Pay, and PayTag were all run end-to-end against the live sandbox: two
+users provisioned, a PayTag registered and resolved, a direct
+PayTag-addressed transfer signed, and a QR-Pay-generated transfer signed
+by the scanning "payer." The single most important finding from this
+phase: the value BMONI actually wants signed is a raw digest
+(`signingPayloadHash`) it returns alongside a full EIP-712 `typedData`
+structure — signing the *properly computed* EIP-712 hash of that
+structure was tested against the live sandbox and **rejected**
+("signature does not match your registered owner address"); signing
+`signingPayloadHash` directly was accepted. Also found and fixed: several
+proposal endpoint paths in the build brief don't exist at all (there is
+no "approve" endpoint anywhere in BMONI's API — signing a proposal *is*
+the approval), and BMONI's own OpenAPI spec (served at
+`/docs/openapi.json` on the sandbox host, undocumented in the brief) is a
+much better starting point than guessing but is itself not fully in sync
+with live behavior. See `backend/README.md` "Phase 3 findings" for the
+complete list. Deposits and NGN bank withdrawal are wired and typed
+against confirmed request/response shapes but not verified end-to-end:
+crypto deposit 502'd from BMONI's own upstream bridge provider on every
+attempt, and NGN account verification needs a real NUBAN this sandbox has
+no test value for.
+
+The Flutter app is scaffolded and wired for all three phases, written
+against the real `bmoni_embedded_sdk` v0.0.2 API (inspected from its
+pub.dev package, not guessed) and the backend's confirmed-live HTTP
+contract, but **has not been run** — this environment has no Flutter/Dart
+SDK installed. See `app/README.md`.
 
 ## Quickstart
 
@@ -109,6 +135,7 @@ npm run start:dev            # backend on :3000
 npm run sandbox:lifecycle    # re-verify Phase 1 against the live sandbox
 npm run sandbox:phase2       # re-verify Phase 2 NGN KYC + onboarding
 npm run sandbox:kyc-mismatch # the deliberate BVN/name-mismatch check
+npm run sandbox:phase3       # re-verify Phase 3 transfers, QR Pay, PayTag
 ```
 
 ```bash

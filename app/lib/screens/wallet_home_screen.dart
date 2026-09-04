@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import '../models/app_user.dart';
 import '../models/kyc.dart';
 import '../services/api_client.dart';
+import 'transfer/send_money_screen.dart';
+import 'transfer/qr_pay_screen.dart';
+import 'transfer/paytag_screen.dart';
 
 /// Phase 2: real balances + transaction history, fetched fresh from the
 /// backend rather than relying on a wallet object passed in at creation
-/// time. Transfers land in Phase 3.
+/// time. Phase 3 adds send/QR Pay/PayTag entry points.
 class WalletHomeScreen extends StatefulWidget {
   final AppUser user;
   const WalletHomeScreen({super.key, required this.user});
@@ -51,7 +54,39 @@ class _WalletHomeScreenState extends State<WalletHomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text('Hi, ${widget.user.firstName}'),
-        actions: [IconButton(icon: const Icon(Icons.refresh), onPressed: _load)],
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.alternate_email),
+            tooltip: 'PayTag',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => PayTagScreen(user: widget.user)),
+            ),
+          ),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
+        ],
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      floatingActionButton: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          FloatingActionButton.extended(
+            heroTag: 'send',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => SendMoneyScreen(user: widget.user)),
+            ),
+            icon: const Icon(Icons.send),
+            label: const Text('Send'),
+          ),
+          const SizedBox(width: 12),
+          FloatingActionButton.extended(
+            heroTag: 'qr',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => QrPayScreen(user: widget.user)),
+            ),
+            icon: const Icon(Icons.qr_code),
+            label: const Text('QR Pay'),
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())

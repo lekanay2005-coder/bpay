@@ -11,6 +11,11 @@ then NGN or USD rail onboarding depending on which currency the Phase 1
 wallet was created for, then a wallet home screen with real balances and
 transaction history.
 
+Phase 3: send money directly (by PayTag, BMONI user ID, or raw wallet
+address), QR Pay (generate a QR to receive, or scan one to pay), and a
+PayTag registration screen — all resolving to the same sign/submit flow
+via `lib/services/transfer_flow.dart`.
+
 > **Not run in this environment.** The sandbox this was built in has no
 > Flutter/Dart SDK installed, so this code has not been through
 > `flutter pub get` / `flutter analyze` / `flutter run`. It was written and
@@ -33,11 +38,12 @@ flutter create --org com.payflex --project-name payflex .   # adds android/ios/ 
 flutter pub get
 
 # Camera permission is required for the Phase 2 KYC capture screens
-# (image_picker) — add to android/app/src/main/AndroidManifest.xml:
+# (image_picker) AND Phase 3's QR scanner (mobile_scanner reuses the same
+# permission) — add to android/app/src/main/AndroidManifest.xml:
 #   <uses-permission android:name="android.permission.CAMERA" />
 # and to ios/Runner/Info.plist:
 #   <key>NSCameraUsageDescription</key>
-#   <string>PayFlex needs your camera to verify your identity documents.</string>
+#   <string>PayFlex needs your camera to verify your identity documents and scan payment QR codes.</string>
 
 # Point at your locally running backend (see ../backend/README.md).
 # 10.0.2.2 is the Android emulator's alias for the host's localhost;
@@ -88,9 +94,27 @@ flutter run --dart-define=BACKEND_BASE_URL=http://10.0.2.2:3000
    BMONI runs a real Sumsub check and returns 422
    `BAD_SELFIE`/`DOCUMENT_PAGE_MISSING` against anything that isn't an
    actual photo, so this needs a real device camera to verify.
-5. `WalletHomeScreen` — real balances and, per wallet, a transaction
-   history screen, fetched from the backend's wallet-home endpoints.
-   Transfers land in Phase 3.
+5. `WalletHomeScreen` — real balances, a transaction history screen per
+   wallet, and (Phase 3) Send / QR Pay / PayTag entry points.
+6. `SendMoneyScreen` (Phase 3) — pick a recipient by PayTag, BMONI user
+   ID, or raw address, then `ApiClient.createTransfer` +
+   `transfer_flow.dart`'s shared sign/submit helper.
+7. `QrPayScreen` (Phase 3) — "My QR" generates and displays a short-lived
+   token as a QR code (`qr_flutter`); "Scan to pay" (`mobile_scanner`)
+   decodes one and runs the same sign/submit flow. **Critical and
+   non-obvious**: the value actually signed is `signingPayloadHash` from
+   the backend's sign-payload response, taken as a **raw digest** via
+   `WalletService.signDigest` (→ `BmoniEmbeddedSdk.signTransactionHash`)
+   — NOT an EIP-712 hash computed from the accompanying `typedData`
+   object, even though BMONI hands back a full EIP-712 structure that
+   looks like it wants one. This was confirmed against the live sandbox:
+   signing the properly-computed EIP-712 digest was tested and BMONI
+   rejected it ("signature does not match your registered owner
+   address"); signing `signingPayloadHash` directly was accepted. See
+   `../backend/README.md` "Phase 3 findings" for the full story — getting
+   this backwards produces a signature that fails with a generic mismatch
+   error and no hint the digest itself was wrong.
+8. `PayTagScreen` (Phase 3) — register/view the current user's `@handle`.
 
 ## Explicitly deferred (see docs/BUILD_PROMPT.md section 4)
 

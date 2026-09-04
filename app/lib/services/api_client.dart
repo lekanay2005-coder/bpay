@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import '../config/env.dart';
 import '../models/app_user.dart';
 import '../models/kyc.dart';
+import '../models/transfer.dart';
 
 class ApiException implements Exception {
   final int statusCode;
@@ -253,5 +254,131 @@ class ApiClient {
     return (body['transactions'] as List)
         .map((e) => Transaction.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  // --- PayTag (Phase 3) ---------------------------------------------------
+
+  Future<void> registerPayTag(String appUserId, String tag) async {
+    final res = await http.post(
+      _uri('/users/$appUserId/paytag'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'tag': tag}),
+    );
+    _decodeAnyOrThrow(res);
+  }
+
+  Future<String?> getMyPayTag(String appUserId) async {
+    final res = await http.get(_uri('/users/$appUserId/paytag'));
+    final body = _decodeAnyOrThrow(res);
+    return body == null ? null : (body as Map<String, dynamic>)['tag'] as String?;
+  }
+
+  Future<PayTagUser> resolvePayTag(String tag) async {
+    final res = await http.get(_uri('/paytag/$tag'));
+    return PayTagUser.fromJson(_decodeOrThrow(res));
+  }
+
+  // --- Transfers (Phase 3) -------------------------------------------------
+  //
+  // Every transfer mode (direct, PayTag, QR) ends up calling createTransfer
+  // then walking sign-payload -> sign, exactly like TransferService on the
+  // backend. Exactly one of toBmoniUserId / toAddress / toPayTag must be set.
+
+  Future<Proposal> createTransfer(
+    String appUserId, {
+    String? toBmoniUserId,
+    String? toAddress,
+    String? toPayTag,
+    required String amount,
+    required String currency,
+    String? description,
+  }) async {
+    final res = await http.post(
+      _uri('/users/$appUserId/transfers'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        if (toBmoniUserId != null) 'toBmoniUserId': toBmoniUserId,
+        if (toAddress != null) 'toAddress': toAddress,
+        if (toPayTag != null) 'toPayTag': toPayTag,
+        'amount': amount,
+        'currency': currency,
+        if (description != null) 'description': description,
+      }),
+    );
+    return Proposal.fromJson(_decodeOrThrow(res));
+  }
+
+  /// Confirmed live: the sign payload is prepared asynchronously and can
+  /// 409 for a couple of seconds after the proposal is created — retry
+  /// rather than treating one 409 as fatal.
+  Future<ProposalSignPayload> getTransferSignPayload(
+    String appUserId,
+    String proposalId, {
+    int maxAttempts = 8,
+  }) async {
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      final res = await http.get(
+        _uri('/users/$appUserId/transfers/$proposalId/sign-payload'),
+      );
+      if (res.statusCode == 409 && attempt < maxAttempts - 1) {
+        await Future.delayed(const Duration(milliseconds: 1500));
+        continue;
+      }
+      return ProposalSignPayload.fromJson(_decodeOrThrow(res));
+    }
+    throw ApiException(409, 'Sign payload never became ready.');
+  }
+
+  Future<Proposal> signTransfer(String appUserId, String proposalId, String signature) async {
+    final res = await http.post(
+      _uri('/users/$appUserId/transfers/$proposalId/sign'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'signature': signature}),
+    );
+    return Proposal.fromJson(_decodeOrThrow(res));
+  }
+
+  Future<Proposal> rejectTransfer(String appUserId, String proposalId, {String? reason}) async {
+    final res = await http.post(
+      _uri('/users/$appUserId/transfers/$proposalId/reject'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({if (reason != null) 'reason': reason}),
+    );
+    return Proposal.fromJson(_decodeOrThrow(res));
+  }
+
+  Future<List<Proposal>> listTransfers(String appUserId, String currency) async {
+    final res = await http.get(_uri('/users/$appUserId/transfers?currency=$currency'));
+    final body = _decodeOrThrow(res);
+    return (body['proposals'] as List)
+        .map((e) => Proposal.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  // --- QR Pay (Phase 3) -----------------------------------------------------
+
+  Future<String> generateQr(
+    String appUserId, {
+    required String amount,
+    required String currency,
+  }) async {
+    final res = await http.post(
+      _uri('/users/$appUserId/qr/generate'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'amount': amount, 'currency': currency}),
+    );
+    final body = _decodeOrThrow(res);
+    return body['token'] as String;
+  }
+
+  /// Called by the payer after scanning — creates the transfer proposal
+  /// server-side from the (HMAC-verified) QR token.
+  Future<Proposal> payQr(String appUserId, String token) async {
+    final res = await http.post(
+      _uri('/users/$appUserId/qr/pay'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'token': token}),
+    );
+    return Proposal.fromJson(_decodeOrThrow(res));
   }
 }

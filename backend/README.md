@@ -73,6 +73,33 @@ fixture image fails (see finding below) — completing it requires an
 actual photorealistic ID/selfie capture, which only makes sense to test
 from the real Flutter app on a device.
 
+## Verifying Phase 3 against the live sandbox
+
+```bash
+npm run sandbox:phase3
+```
+
+`scripts/sandbox-lifecycle-phase3.ts` provisions two users with NGN smart
+wallets, registers a PayTag for one of them, then exercises every
+transfer path through the real `TransferService` / `PayTagService` /
+`QrPayService`: a direct PayTag-resolved transfer, a QR-Pay-initiated
+transfer (generate → decode → pay), signing both proposals, rejecting a
+third, and listing proposals. This has been run against the live sandbox
+and passes end-to-end — proposal creation and signing are both confirmed
+working. What it can *not* verify: on-chain execution, because this
+sandbox has no faucet and the one funding path that exists (crypto
+deposit) 502'd on every attempt — see findings below. That's a sandbox
+limitation, not a gap in this integration.
+
+Before writing any Phase 3 code, this pass also discovered that BMONI's
+own OpenAPI spec is served at `GET /docs/openapi.json` on the sandbox
+host (linked from `/docs`, a Scalar API reference page) — this is *not*
+mentioned anywhere in the build brief. It's far more reliable than
+guessing paths by trial and error the way Phases 1-2 had to, though it is
+**not** perfectly in sync with live behavior either (see the proposal
+response-envelope mismatch below) — treat it as a strong hint to verify
+live, not a substitute for testing.
+
 ## Things discovered empirically that the brief didn't fully spell out
 
 BMONI's request/response shapes for a few endpoints turned out to differ
@@ -204,6 +231,121 @@ user carried through the full wizard:
   BMONI/product before relying on it for anything KYC-sensitive; don't
   quietly assume the brief's description is what's actually enforced.
 
+### Phase 3 findings
+
+The proposal/transfer surface is where the build brief's literal
+endpoints diverge from live behavior the most — every path below was
+wrong or incomplete in the brief and had to be re-derived from BMONI's
+OpenAPI spec (`GET /docs/openapi.json`) and then confirmed against a real
+signed, submitted proposal:
+
+- **Proposal creation/listing need the `/v1/users/{userId}` prefix the
+  brief omits**: `POST/GET /v1/users/{userId}/smart-wallets/{smartWalletId}/proposals`,
+  not `POST /smart-wallets/{smartWalletId}/proposals`. The body must be
+  wrapped as `{ proposal: {...} }`, not the proposal fields at the top
+  level.
+- **There is no "approve" endpoint at all**, despite the brief — and even
+  BMONI's own endpoint descriptions in its OpenAPI spec — describing an
+  "approve → sign-payload → sign" sequence. Every plausible path
+  (`/proposals/:id/approve` under half a dozen prefix variations) 404'd.
+  Submitting a valid signature via `sign` **is** the approval action; plan
+  around reject/sign-payload/sign/get as the complete set of proposal
+  mutations, not four of five.
+- **`reject`/`sign`/`sign-payload`/`get` are addressed by `proposalId`
+  alone**, nested directly under `smart-wallets` — NOT under a specific
+  `smartWalletId` the way creation is:
+  `/v1/users/{userId}/smart-wallets/proposals/{proposalId}/sign` (etc.),
+  not `/v1/proposals/{proposalId}/sign`.
+- **The value to sign is `signingPayloadHash`, taken as a raw digest — not
+  the EIP-712 hash of the accompanying `typedData` object.** `GET
+  sign-payload` returns `{ signingPayloadHash, typedData, signatureExpiresAt,
+  proposalStatus }`, where `typedData` is a full EIP-712 structure (domain
+  `"Coinbase Smart Wallet"`, type `CoinbaseSmartWalletMessage`). The
+  intuitive reading — compute the real EIP-712 digest from `typedData` and
+  sign that — was tested directly against the live sandbox using
+  `ethers.TypedDataEncoder.hash(domain, types, message)` and BMONI
+  **rejected** the result: `"Signature does not match your registered
+  owner address"`. Signing `signingPayloadHash` directly (raw ECDSA over
+  that exact 32-byte value, no additional hashing) was **accepted**. This
+  matches `bmoni_embedded_sdk`'s `signTransactionHash` exactly (its own
+  docstring: "no prefix and no additional hashing is applied — the
+  supplied hash is signed directly") — meaning the Flutter app needs
+  **no EIP-712 encoder at all**, despite BMONI handing back a full typed-data
+  structure that looks like it wants one. Get this backwards and every
+  signature silently fails with a generic mismatch error that gives no
+  hint the digest itself was wrong.
+- **The sign payload is prepared asynchronously.** A `GET sign-payload`
+  called immediately after proposal creation can 409 with `{code: "E201",
+  message: "Signing payload is not ready yet. Wait until approvals
+  complete and the transfer is prepared."}`. Both
+  `scripts/sandbox-lifecycle-phase3.ts` and `TransferService` callers
+  should poll (the script retries every 1.5s) rather than assume it's
+  ready right away — this cost real debugging time before we realized it
+  wasn't a one-off flake.
+- **The live response envelope for proposal endpoints is `{ proposal }`
+  everywhere** (create, get, sign, reject) — not the
+  `{success,message,data:{proposal}}` shape BMONI's own OpenAPI spec
+  documents for these same operations. This is the clearest example found
+  so far of the spec and live behavior disagreeing; don't trust the spec's
+  response shape without checking a live call.
+- **BMONI's smart-wallet architecture is a Coinbase Smart Wallet /
+  Safe-style multisig**, not the simple single-owner wallet the brief's
+  description implies. A proposal's `signerSnapshot` lists two addresses
+  (our registered `userOwnerAddress` plus a BMONI-side relay/KMS address),
+  `executionModeSnapshot` is `"SAFE_TX_HASH_KMS_RELAY"`, and a proposal
+  carries independent `currentSignatures`/`requiredSignatures` **and**
+  `currentApprovals`/`requiredApprovals` counters. In every proposal we
+  fully signed in this sandbox (`currentSignatures === requiredSignatures`),
+  `currentApprovals` stayed at `0` and the proposal never left
+  `PENDING_APPROVALS` even after ~30s of polling — plausibly because
+  on-chain execution (and whatever grants the "approval") is gated on the
+  wallet actually being able to fund the transfer, which a zero-balance
+  sandbox wallet never can. Don't read a fully-signed, still-pending
+  proposal as evidence of a bug in this integration.
+- **A wallet's stored `currency` is the fiat label (`"NGN"`), but the
+  proposal body's `currency` field wants the stablecoin code
+  (`"CNGN"`)** — the same fiat/stablecoin split documented in the Phase 1
+  findings above, now with a second consumer. `TransferService` and
+  `PaymentsService` both take the fiat label (matching everywhere else in
+  this app) and translate via `src/common/currency.util.ts`'s
+  `stablecoinForFiat` before calling BMONI — don't pass a fiat label
+  straight through to a proposal body a second time.
+- **`account/send` (the documented "let the server pick the wallet"
+  convenience endpoint) does not return what its own OpenAPI spec
+  describes.** The spec says it returns `FundSmartWalletResponse` →
+  `{ signatureRequest, quote }` (ready-to-sign, no separate sign-payload
+  call needed); live, it returned a bare `{ proposal }` — the exact same
+  shape as the raw proposals endpoint, requiring the normal
+  sign-payload/sign follow-up. This backend uses the raw
+  `.../smart-wallets/{smartWalletId}/proposals` endpoint directly instead
+  of `account/send`/`fund`, since we already track `smartWalletId` locally
+  and the "convenience" wrapper turned out not to save a round trip
+  anyway.
+- **Crypto deposit only bridges into a USDB wallet.** `POST deposit/wallet`
+  against a CNGN wallet returned `400 "Group wallet must be for USDB
+  currency, got CNGN"`. `GET deposit/supported-assets` listed only `USDC`
+  as an enabled token per chain in this sandbox, despite `WalletDepositInput`'s
+  documented enum including DAI/EURC/PYUSD/USDP/USDT. The deposit call
+  itself returned a raw (non-JSON) `502` from BMONI's upstream bridge
+  provider on every attempt — `PaymentsService.createDepositAddress` is
+  wired and typed correctly against the confirmed request/response shapes,
+  but could not be verified working end-to-end in this sandbox.
+- **NGN bank account verification needs a real NUBAN** — unlike the BVN
+  test values in build brief section 6, there's no documented sandbox
+  test account number, so `verify-nigerian-account` /
+  `withdrawal-accounts/nigeria` / `withdrawal/wallet/nigeria` are wired
+  and typed against BMONI's OpenAPI spec but not exercised end-to-end here
+  (a fabricated 10-digit number correctly 400s: `"We could not verify
+  this account"`).
+- One owner address maps to exactly one BMONI "group wallet" shared across
+  all that user's currencies — adding a second currency wallet for a user
+  requires reusing their **existing** `userOwnerAddress` in a fresh
+  owner-proof-challenge for the new currency, not generating a new random
+  owner. (This was already how `OnboardingService.createSmartWallet`
+  worked, since it reads `AppUser.ownerAddress` — this surfaced only as a
+  bug in a disposable verification script that generated a fresh random
+  wallet per currency instead of reusing the app's own persisted one.)
+
 ## Testing
 
 ```bash
@@ -211,4 +353,5 @@ npm test                      # unit tests (no network)
 npm run sandbox:lifecycle     # Phase 1: user + owner wallet + smart wallet
 npm run sandbox:phase2        # Phase 2: full NGN KYC wizard + onboarding + wallet home
 npm run sandbox:kyc-mismatch  # Phase 2: the deliberate BVN/name-mismatch check
+npm run sandbox:phase3        # Phase 3: transfers, QR Pay, PayTag
 ```

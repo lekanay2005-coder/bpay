@@ -44,25 +44,34 @@ import {
 } from './dto/onboarding.dto';
 import {
   Balance,
+  CreateNigerianWithdrawalAccountRequest,
   CreateProposalRequest,
-  DepositWalletAddressResponse,
+  CreateProposalResponse,
   ExchangeConvertRequest,
   ExchangeRateResponse,
   ListBalancesResponse,
+  ListProposalsResponse,
   ListWalletsResponse,
+  NigerianBanksResponse,
+  NigerianWithdrawalAccountResponse,
   OfframpNigeriaRequest,
+  OfframpProposalResponse,
+  OfframpWithSignPayloadResponse,
   PayoutsRequest,
   PayoutsValidateAccountRequest,
   Proposal,
+  ProposalMutationResponse,
   ProposalSignPayloadResponse,
+  RejectProposalRequest,
   SignProposalRequest,
   SignatureRequest,
+  SupportedDepositAssetsResponse,
   TransactionsResponse,
-  VbaAccountResponse,
   VerifyNigerianAccountRequest,
   VerifyNigerianAccountResponse,
-  WithdrawalAccountNigeriaRequest,
-  WithdrawalAccountNigeriaResponse,
+  WalletDepositAddressRequest,
+  WalletDepositAddressResponse,
+  WalletNigeriaWithdrawalRequest,
 } from './dto/wallet-home.dto';
 
 /**
@@ -303,38 +312,76 @@ export class BmoniClientService {
     return this.request({ method: 'GET', url: BmoniPaths.walletDetail(userId, smartWalletId) });
   }
 
-  createDepositWalletAddress(userId: string): Promise<DepositWalletAddressResponse> {
-    return this.request({ method: 'POST', url: BmoniPaths.depositWalletAddress(userId) });
-  }
-
-  createVbaNgn(userId: string): Promise<VbaAccountResponse> {
-    return this.request({ method: 'POST', url: BmoniPaths.vbaNgn(userId) });
-  }
-
-  createVbaEu(userId: string): Promise<VbaAccountResponse> {
-    return this.request({ method: 'POST', url: BmoniPaths.vbaEu(userId) });
-  }
-
-  verifyNigerianAccount(
-    body: VerifyNigerianAccountRequest,
-  ): Promise<VerifyNigerianAccountResponse> {
-    return this.request({ method: 'POST', url: BmoniPaths.verifyNigerianAccount(), data: body });
-  }
-
-  createNigerianWithdrawalAccount(
-    body: WithdrawalAccountNigeriaRequest,
-  ): Promise<WithdrawalAccountNigeriaResponse> {
+  /**
+   * Confirmed live (2026-09-04): only works against a USDB smart wallet
+   * ("Group wallet must be for USDB currency, got CNGN" for anything
+   * else) — crypto deposits bridge into USDB specifically, not directly
+   * into other stablecoins. The call itself 502'd from BMONI's upstream
+   * bridge provider on every attempt in this sandbox; see
+   * WalletDepositAddressResponse's doc comment.
+   */
+  createDepositWalletAddress(
+    userId: string,
+    body: WalletDepositAddressRequest,
+  ): Promise<WalletDepositAddressResponse> {
     return this.request({
       method: 'POST',
-      url: BmoniPaths.withdrawalAccountsNigeria(),
+      url: BmoniPaths.depositWalletAddress(userId),
       data: body,
     });
   }
 
-  offrampNigeria(smartWalletId: string, body: OfframpNigeriaRequest): Promise<unknown> {
+  getSupportedDepositAssets(): Promise<SupportedDepositAssetsResponse> {
+    return this.request({ method: 'GET', url: BmoniPaths.depositSupportedAssets() });
+  }
+
+  getNigerianBanks(userId: string): Promise<NigerianBanksResponse> {
+    return this.request({ method: 'GET', url: BmoniPaths.nigerianBanks(userId) });
+  }
+
+  verifyNigerianAccount(
+    userId: string,
+    body: VerifyNigerianAccountRequest,
+  ): Promise<VerifyNigerianAccountResponse> {
     return this.request({
       method: 'POST',
-      url: BmoniPaths.offrampNigeria(smartWalletId),
+      url: BmoniPaths.verifyNigerianAccount(userId),
+      data: body,
+    });
+  }
+
+  createNigerianWithdrawalAccount(
+    userId: string,
+    body: CreateNigerianWithdrawalAccountRequest,
+  ): Promise<NigerianWithdrawalAccountResponse> {
+    return this.request({
+      method: 'POST',
+      url: BmoniPaths.withdrawalAccountsNigeria(userId),
+      data: body,
+    });
+  }
+
+  /** Lower-level path: create-proposal -> sign-payload -> sign, same as any other TRANSFER. */
+  offrampNigeria(
+    userId: string,
+    smartWalletId: string,
+    body: OfframpNigeriaRequest,
+  ): Promise<OfframpProposalResponse> {
+    return this.request({
+      method: 'POST',
+      url: BmoniPaths.offrampNigeria(userId, smartWalletId),
+      data: body,
+    });
+  }
+
+  /** Higher-level path: creates + auto-approves the offramp proposal and returns a sign payload in one call. */
+  withdrawWalletNigeria(
+    userId: string,
+    body: WalletNigeriaWithdrawalRequest,
+  ): Promise<OfframpWithSignPayloadResponse> {
+    return this.request({
+      method: 'POST',
+      url: BmoniPaths.withdrawalWalletNigeria(userId),
       data: body,
     });
   }
@@ -354,32 +401,88 @@ export class BmoniClientService {
     return this.request({ method: 'POST', url: BmoniPaths.payouts(userId), data: body });
   }
 
-  getExchangeRate(from: string, to: string): Promise<ExchangeRateResponse> {
-    return this.request({ method: 'GET', url: BmoniPaths.exchangeRate(from, to) });
+  getExchangeRate(userId: string, from: string, to: string): Promise<ExchangeRateResponse> {
+    return this.request({ method: 'GET', url: BmoniPaths.exchangeRate(userId, from, to) });
   }
 
   convertExchange(userId: string, body: ExchangeConvertRequest): Promise<unknown> {
     return this.request({ method: 'POST', url: BmoniPaths.exchangeConvert(userId), data: body });
   }
 
-  createProposal(smartWalletId: string, body: CreateProposalRequest): Promise<Proposal> {
-    return this.request({ method: 'POST', url: BmoniPaths.createProposal(smartWalletId), data: body });
+  /**
+   * Confirmed live and via BMONI's own OpenAPI spec (2026-09-04): needs
+   * the /v1/users/{userId} prefix the brief omits, and the body must be
+   * wrapped as `{ proposal: {...} }`. Response is `{ proposal }` (not the
+   * `{success,message,data:{proposal}}` envelope the OpenAPI spec — which
+   * is not fully in sync with live behavior — documents).
+   */
+  createProposal(
+    userId: string,
+    smartWalletId: string,
+    body: CreateProposalRequest,
+  ): Promise<Proposal> {
+    return this.request<CreateProposalResponse>({
+      method: 'POST',
+      url: BmoniPaths.createProposal(userId, smartWalletId),
+      data: { proposal: body },
+    }).then((res) => res.proposal);
   }
 
-  rejectProposal(proposalId: string): Promise<unknown> {
-    return this.request({ method: 'POST', url: BmoniPaths.rejectProposal(proposalId) });
+  listProposals(userId: string, smartWalletId: string): Promise<ListProposalsResponse> {
+    return this.request({ method: 'GET', url: BmoniPaths.listProposals(userId, smartWalletId) });
   }
 
-  approveProposal(proposalId: string): Promise<unknown> {
-    return this.request({ method: 'POST', url: BmoniPaths.approveProposal(proposalId) });
+  getProposal(userId: string, proposalId: string): Promise<Proposal> {
+    return this.request<CreateProposalResponse>({
+      method: 'GET',
+      url: BmoniPaths.getProposal(userId, proposalId),
+    }).then((res) => res.proposal);
   }
 
-  getProposalSignPayload(proposalId: string): Promise<ProposalSignPayloadResponse> {
-    return this.request({ method: 'GET', url: BmoniPaths.proposalSignPayload(proposalId) });
+  /**
+   * Confirmed live: there is no separate "approve" endpoint despite the
+   * brief (and BMONI's own endpoint descriptions) mentioning one —
+   * submitting a valid signature via signProposal IS the approval action.
+   */
+  rejectProposal(
+    userId: string,
+    proposalId: string,
+    body?: RejectProposalRequest,
+  ): Promise<ProposalMutationResponse> {
+    return this.request({
+      method: 'POST',
+      url: BmoniPaths.rejectProposal(userId, proposalId),
+      data: body,
+    });
   }
 
-  signProposal(proposalId: string, body: SignProposalRequest): Promise<unknown> {
-    return this.request({ method: 'POST', url: BmoniPaths.signProposal(proposalId), data: body });
+  getProposalSignPayload(
+    userId: string,
+    proposalId: string,
+  ): Promise<ProposalSignPayloadResponse> {
+    return this.request({
+      method: 'GET',
+      url: BmoniPaths.proposalSignPayload(userId, proposalId),
+    });
+  }
+
+  /**
+   * Confirmed live: sign `signingPayloadHash` from getProposalSignPayload
+   * directly as a raw digest (e.g. via bmoni_embedded_sdk's
+   * signTransactionHash) — NOT the full EIP-712 hash of the accompanying
+   * `typedData`. See ProposalSignPayloadResponse's doc comment; signing
+   * the properly-computed EIP-712 digest was tested and rejected.
+   */
+  signProposal(
+    userId: string,
+    proposalId: string,
+    body: SignProposalRequest,
+  ): Promise<ProposalMutationResponse> {
+    return this.request({
+      method: 'POST',
+      url: BmoniPaths.signProposal(userId, proposalId),
+      data: body,
+    });
   }
 
   getTransactions(

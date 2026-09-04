@@ -8,6 +8,8 @@ import { OnboardingModule } from './onboarding/onboarding.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { KycModule } from './kyc/kyc.module';
 import { WalletModule } from './wallet/wallet.module';
+import { TransferModule } from './transfer/transfer.module';
+import { PaymentsModule } from './payments/payments.module';
 
 @Module({
   imports: [
@@ -19,6 +21,8 @@ import { WalletModule } from './wallet/wallet.module';
     WebhooksModule,
     KycModule,
     WalletModule,
+    TransferModule,
+    PaymentsModule,
   ],
 })
 export class AppModule {}
