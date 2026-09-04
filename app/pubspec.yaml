@@ -1,0 +1,31 @@
+name: payflex
+description: >
+  PayFlex — mobile-first microfinance app built on the BMONI Embedded API.
+  Phase 1: user creation + on-device owner wallet + managed smart wallet
+  provisioning, end to end against the PayFlex orchestration backend.
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '^3.9.0'
+  flutter: '>=3.3.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # On-device EVM keypair generation, secure storage, and EIP-191 signing.
+  # Never implement key generation/signing outside this package.
+  bmoni_embedded_sdk: ^0.0.2
+
+  http: ^1.2.2
+  shared_preferences: ^2.3.2
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
