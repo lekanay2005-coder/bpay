@@ -10,6 +10,6 @@ import { UsersModule } from '../users/users.module';
   imports: [UsersModule],
   providers: [TransferService, PayTagService, QrPayService],
   controllers: [TransferController, QrPayController],
-  exports: [TransferService],
+  exports: [TransferService, PayTagService],
 })
 export class TransferModule {}

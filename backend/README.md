@@ -11,6 +11,9 @@ npm install
 cp .env.example .env          # sandbox key is already filled in
 docker-compose up -d          # Postgres + Redis for local dev
 npx prisma migrate dev        # creates the schema (first run only)
+npm run provision:treasury    # one-time: creates PayFlex's own treasury BMONI account
+                               # (paste its output's two lines into .env — required for
+                               # loan disbursement; everything else works without it)
 npm run start:dev             # http://localhost:3000
 ```
 
@@ -346,6 +349,72 @@ signed, submitted proposal:
   bug in a disposable verification script that generated a fresh random
   wallet per currency instead of reusing the app's own persisted one.)
 
+## Verifying Phase 4 against the live sandbox
+
+```bash
+npm run provision:treasury    # one-time: creates PayFlex's own treasury BMONI account
+npm run sandbox:phase4        # savings, loans (incl. auto-disbursement), agent mode
+```
+
+`scripts/sandbox-lifecycle-phase4.ts` runs the real `SavingsService` /
+`LoansService` / `AgentService` / `TreasuryService`: creates a savings
+goal, back-dates it and runs the due-check, signs the resulting
+contribution; applies for a loan with a fresh account (correctly
+rejected, score 0) and with a back-dated account (approved, and — this is
+the interesting part — **disbursed with PayFlex's treasury account
+signing server-side, no simulated end-user interaction at all**); signs a
+loan repayment; then runs an agent cash-in and cash-out, each signed by
+whichever side is the sender. This has been run against the live sandbox
+and passes end-to-end, log line included:
+`[TreasuryService] Treasury signing digest 0x...` — proof the server-side
+signing path actually executed, not just the borrower-side ones every
+other phase already covers.
+
+### Phase 4 findings
+
+Phase 4 needed no new BMONI endpoints — everything here is pure PayFlex
+logic (build brief section 3) built on the same proposal primitive from
+Phase 3 — but building it surfaced one structural point worth calling
+out clearly, plus a scoring caveat:
+
+- **BMONI's signing model has no delegated/pre-authorized debit
+  mechanism**, which is why "scheduled transfer jobs" for savings
+  (section 5's Phase 4 bullet) can only ever mean "the backend decides
+  when a contribution is *due*," never "the backend executes it
+  unattended." Every transfer — savings contribution, loan repayment,
+  agent cash-out — is signed by the paying party's own on-device key, so
+  `SavingsSchedulerService`'s hourly cron only flips a contribution to
+  `DUE`; a human still has to open the app and sign it. This isn't a
+  shortcut we took — it's a real constraint of an architecture where key
+  custody never leaves the user's device, and it's worth stating
+  explicitly so nobody "fixes" the scheduler to attempt silent execution
+  later.
+- **Loan disbursement is the one case in this entire app where PayFlex
+  signs a transfer itself**, because PayFlex's own money is moving under
+  PayFlex's own authority with no borrower action required. That needs a
+  server-held signing key — `src/treasury/treasury.service.ts` holds it
+  from a plain `.env` var in this sandbox build, which is explicitly
+  flagged there as unacceptable for production (needs a real KMS/HSM).
+  Provisioning the treasury account hit the same "config eagerly
+  validated in a constructor" trap once already fixed in this codebase:
+  `TreasuryService` originally threw at app-boot if its env vars weren't
+  set, which would have made it impossible to ever run
+  `provision:treasury` in the first place (it boots the same `AppModule`).
+  Fixed by validating lazily, on first real use, instead.
+- **Credit scoring can only ever be as good as the transaction history
+  available**, and this sandbox's wallets are permanently at zero balance
+  (see Phase 3's findings — there's no way to fund a test wallet here),
+  so every real transaction-history signal `SimpleCreditScoringStrategy`
+  looks at is always empty in this environment. `scripts/sandbox-
+  lifecycle-phase4.ts` demonstrates both branches honestly: a fresh
+  account is correctly rejected (score 0), and to also exercise the
+  approval/disbursement path the script deliberately back-dates a test
+  user's `createdAt` by 90 days (clearly commented as test-only) so the
+  account-age component alone clears the threshold. A real deployment's
+  scores will only become meaningful once real transaction volume exists
+  to score against — that's inherent to the approach the brief asks for
+  (score off transaction history), not a defect in this implementation.
+
 ## Testing
 
 ```bash
@@ -354,4 +423,5 @@ npm run sandbox:lifecycle     # Phase 1: user + owner wallet + smart wallet
 npm run sandbox:phase2        # Phase 2: full NGN KYC wizard + onboarding + wallet home
 npm run sandbox:kyc-mismatch  # Phase 2: the deliberate BVN/name-mismatch check
 npm run sandbox:phase3        # Phase 3: transfers, QR Pay, PayTag
+npm run sandbox:phase4        # Phase 4: savings, loans + disbursement, agent mode
 ```

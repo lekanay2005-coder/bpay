@@ -3,8 +3,9 @@ description: >
   PayFlex — mobile-first microfinance app built on the BMONI Embedded API.
   Phase 1: user creation + on-device owner wallet + managed smart wallet
   provisioning. Phase 2: KYC wizard, NGN/USD rail onboarding, wallet home
-  balances/history. Phase 3: transfers, QR Pay, PayTag — all end to end
-  against the PayFlex orchestration backend.
+  balances/history. Phase 3: transfers, QR Pay, PayTag. Phase 4: savings
+  goals, loans, agent mode — all end to end against the PayFlex
+  orchestration backend.
 publish_to: 'none'
 version: 0.1.0
 

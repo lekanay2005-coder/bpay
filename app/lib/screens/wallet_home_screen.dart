@@ -5,10 +5,14 @@ import '../services/api_client.dart';
 import 'transfer/send_money_screen.dart';
 import 'transfer/qr_pay_screen.dart';
 import 'transfer/paytag_screen.dart';
+import 'savings/savings_screen.dart';
+import 'loans/loans_screen.dart';
+import 'agent/agent_screen.dart';
 
 /// Phase 2: real balances + transaction history, fetched fresh from the
 /// backend rather than relying on a wallet object passed in at creation
-/// time. Phase 3 adds send/QR Pay/PayTag entry points.
+/// time. Phase 3 adds send/QR Pay/PayTag entry points. Phase 4 adds
+/// savings/loans/agent mode via the overflow menu.
 class WalletHomeScreen extends StatefulWidget {
   final AppUser user;
   const WalletHomeScreen({super.key, required this.user});
@@ -63,6 +67,24 @@ class _WalletHomeScreenState extends State<WalletHomeScreen> {
             ),
           ),
           IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              final screen = switch (value) {
+                'savings' => SavingsScreen(user: widget.user),
+                'loans' => LoansScreen(user: widget.user),
+                'agent' => AgentScreen(user: widget.user),
+                _ => null,
+              };
+              if (screen != null) {
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'savings', child: Text('Savings goals')),
+              PopupMenuItem(value: 'loans', child: Text('Loans')),
+              PopupMenuItem(value: 'agent', child: Text('Agent mode')),
+            ],
+          ),
         ],
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,

@@ -43,8 +43,15 @@ history.
 transfer primitive above):
 - **Lending/credit scoring** — BMONI has no loan product; scoring is a
   pluggable `CreditScoringStrategy` reading BMONI transaction history.
+  **Done** (Phase 4), including automatic disbursement — see below for
+  why that's the one place PayFlex signs a transfer itself.
 - **Savings goals** — an app-level ledger with scheduled transfers; there
   is no on-chain escrow or smart-contract savings feature in BMONI.
+  **Done** (Phase 4) — "scheduled" means the backend marks a contribution
+  due, not that it executes unattended; see below for why.
+- **Agent cash-in/cash-out** — BMONI has no agent-network concept; both
+  directions are ordinary transfers with a separate reconciliation
+  ledger. **Done** (Phase 4).
 - **Bill payments** (airtime, electricity, ...) — stubbed behind an
   `IBillPaymentProvider` interface for a real aggregator later.
 - **Claimable payment links for non-users** — BMONI has no
@@ -68,7 +75,7 @@ transfer primitive above):
 | 1 — Foundation (user + owner wallet + managed smart wallet) | **Done, verified against the live sandbox** — see `backend/README.md` |
 | 2 — KYC + onboarding (NGN, USD) | **Done for NGN, verified against the live sandbox; USD wired but blocked on a real device camera** — see below |
 | 3 — Transfers (QR, PayTag, deposits, NGN withdrawal) | **Transfers/QR/PayTag done, verified against the live sandbox; deposits and NGN withdrawal wired but blocked on sandbox limitations** — see below |
-| 4 — Microfinance layer (savings, loans, agent mode) | Not started |
+| 4 — Microfinance layer (savings, loans, agent mode) | **Done, verified against the live sandbox — including a real server-side treasury signature for loan disbursement** — see below |
 | 5 — Polish (split-bill, send-via-link/escrow, CAD/EUR/MXN stubs) | Not started |
 
 Phase 1 was run end-to-end against `https://embedded-dev.bmoni.com` (not
@@ -117,7 +124,25 @@ crypto deposit 502'd from BMONI's own upstream bridge provider on every
 attempt, and NGN account verification needs a real NUBAN this sandbox has
 no test value for.
 
-The Flutter app is scaffolded and wired for all three phases, written
+Phase 4 (savings, loans, agent mode) needed no new BMONI endpoints — it's
+all PayFlex's own logic on top of the Phase 3 transfer primitive — but
+was run end-to-end against the live sandbox anyway: a savings goal
+created and its first contribution signed; a loan application correctly
+rejected for a fresh account (credit score 0) and, for a back-dated test
+account, approved and **disbursed with PayFlex's own treasury account
+signing the payout server-side** — the one place in this app where
+PayFlex, not the end user, authorizes a transfer, because it's PayFlex's
+own money moving under PayFlex's own authority. A key architectural
+constraint worth stating plainly: BMONI's signing model has no delegated
+or pre-authorized debit mechanism, so a "scheduled" savings contribution
+can only ever be marked *due* by the backend — a human still has to open
+the app and sign it, the same as any other transfer. See
+`backend/README.md` "Phase 4 findings" for the details, including a
+config-validation bug (treasury setup throwing at app-boot, which would
+have made it impossible to ever provision the treasury) caught and fixed
+during this phase.
+
+The Flutter app is scaffolded and wired for all four phases, written
 against the real `bmoni_embedded_sdk` v0.0.2 API (inspected from its
 pub.dev package, not guessed) and the backend's confirmed-live HTTP
 contract, but **has not been run** — this environment has no Flutter/Dart
@@ -136,6 +161,8 @@ npm run sandbox:lifecycle    # re-verify Phase 1 against the live sandbox
 npm run sandbox:phase2       # re-verify Phase 2 NGN KYC + onboarding
 npm run sandbox:kyc-mismatch # the deliberate BVN/name-mismatch check
 npm run sandbox:phase3       # re-verify Phase 3 transfers, QR Pay, PayTag
+npm run provision:treasury   # one-time: create PayFlex's treasury BMONI account
+npm run sandbox:phase4       # re-verify Phase 4 savings, loans, agent mode
 ```
 
 ```bash

@@ -16,6 +16,13 @@ address), QR Pay (generate a QR to receive, or scan one to pay), and a
 PayTag registration screen — all resolving to the same sign/submit flow
 via `lib/services/transfer_flow.dart`.
 
+Phase 4: savings goals (create a goal, pay a due contribution), loans
+(apply, see the credit-scoring result, pay a repayment), and agent mode
+(toggle agent status, cash-in/cash-out, view your ledger) — all built on
+the same transfer sign/submit flow. Loan disbursement is the one
+exception: it's signed by PayFlex's own treasury account server-side, so
+there's nothing to sign on the borrower's side for that particular step.
+
 > **Not run in this environment.** The sandbox this was built in has no
 > Flutter/Dart SDK installed, so this code has not been through
 > `flutter pub get` / `flutter analyze` / `flutter run`. It was written and
@@ -115,6 +122,20 @@ flutter run --dart-define=BACKEND_BASE_URL=http://10.0.2.2:3000
    this backwards produces a signature that fails with a generic mismatch
    error and no hint the digest itself was wrong.
 8. `PayTagScreen` (Phase 3) — register/view the current user's `@handle`.
+9. `SavingsScreen` (Phase 4) — create a goal, see due contributions, pay
+   one via the shared sign/submit helper. A contribution only ever
+   appears here because the backend's hourly scheduler marked it due —
+   nothing executes without the user opening the app and signing it (see
+   `../backend/README.md` "Phase 4 findings" for why that's a real
+   constraint of BMONI's signing model, not a corner we cut).
+10. `LoansScreen` (Phase 4) — apply for a loan and see the credit-scoring
+    result immediately (approved+disbursed, or rejected, with the score);
+    pay a repayment via the same sign/submit helper. Disbursement itself
+    needs no action here — PayFlex's treasury signs that server-side.
+11. `AgentScreen` (Phase 4) — toggle agent status, cash-in (you're the
+    sender — you received physical cash) or cash-out (the current user is
+    the sender — they're handing digital funds to an agent for cash), and
+    view the agent's own transaction ledger.
 
 ## Explicitly deferred (see docs/BUILD_PROMPT.md section 4)
 

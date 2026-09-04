@@ -5,6 +5,7 @@ import '../config/env.dart';
 import '../models/app_user.dart';
 import '../models/kyc.dart';
 import '../models/transfer.dart';
+import '../models/microfinance.dart';
 
 class ApiException implements Exception {
   final int statusCode;
@@ -380,5 +381,146 @@ class ApiClient {
       body: jsonEncode({'token': token}),
     );
     return Proposal.fromJson(_decodeOrThrow(res));
+  }
+
+  // --- Savings goals (Phase 4) ----------------------------------------------
+  //
+  // A savings contribution's "pay" call returns the same Proposal shape as
+  // every other transfer — sign/submit it via the normal
+  // /transfers/:proposalId/sign-payload and /sign routes.
+
+  Future<SavingsGoal> createSavingsGoal(
+    String appUserId, {
+    required String name,
+    required String currency,
+    required String targetAmount,
+    required String contributionAmount,
+    required String frequency, // "DAILY" | "WEEKLY" | "MONTHLY"
+  }) async {
+    final res = await http.post(
+      _uri('/users/$appUserId/savings/goals'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'name': name,
+        'currency': currency,
+        'targetAmount': targetAmount,
+        'contributionAmount': contributionAmount,
+        'frequency': frequency,
+      }),
+    );
+    return SavingsGoal.fromJson(_decodeOrThrow(res));
+  }
+
+  Future<List<SavingsGoal>> listSavingsGoals(String appUserId) async {
+    final res = await http.get(_uri('/users/$appUserId/savings/goals'));
+    return _decodeListOrThrow(res)
+        .map((e) => SavingsGoal.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<List<SavingsContribution>> listDueContributions(String appUserId) async {
+    final res = await http.get(_uri('/users/$appUserId/savings/due'));
+    return _decodeListOrThrow(res)
+        .map((e) => SavingsContribution.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<Proposal> payContribution(String appUserId, String contributionId) async {
+    final res = await http.post(
+      _uri('/users/$appUserId/savings/contributions/$contributionId/pay'),
+    );
+    return Proposal.fromJson(_decodeOrThrow(res));
+  }
+
+  // --- Loans (Phase 4) -------------------------------------------------------
+
+  Future<LoanApplication> applyForLoan(
+    String appUserId, {
+    required String requestedAmount,
+    required String currency,
+  }) async {
+    final res = await http.post(
+      _uri('/users/$appUserId/loans/apply'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'requestedAmount': requestedAmount, 'currency': currency}),
+    );
+    return LoanApplication.fromJson(_decodeOrThrow(res));
+  }
+
+  Future<List<LoanApplication>> listLoans(String appUserId) async {
+    final res = await http.get(_uri('/users/$appUserId/loans'));
+    return _decodeListOrThrow(res)
+        .map((e) => LoanApplication.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<List<LoanRepayment>> listRepayments(String appUserId, String loanId) async {
+    final res = await http.get(_uri('/users/$appUserId/loans/$loanId/repayments'));
+    return _decodeListOrThrow(res)
+        .map((e) => LoanRepayment.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<Proposal> payRepayment(String appUserId, String repaymentId) async {
+    final res = await http.post(_uri('/users/$appUserId/loans/repayments/$repaymentId/pay'));
+    return Proposal.fromJson(_decodeOrThrow(res));
+  }
+
+  // --- Agent mode (Phase 4) ---------------------------------------------------
+
+  Future<void> setAgentStatus(String appUserId, bool isAgent) async {
+    final res = await http.post(
+      _uri('/users/$appUserId/agent/status'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'isAgent': isAgent}),
+    );
+    _decodeAnyOrThrow(res);
+  }
+
+  Future<Proposal> agentCashIn(
+    String agentAppUserId, {
+    String? toBmoniUserId,
+    String? toPayTag,
+    required String amount,
+    required String currency,
+  }) async {
+    final res = await http.post(
+      _uri('/users/$agentAppUserId/agent/cash-in'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        if (toBmoniUserId != null) 'toBmoniUserId': toBmoniUserId,
+        if (toPayTag != null) 'toPayTag': toPayTag,
+        'amount': amount,
+        'currency': currency,
+      }),
+    );
+    return Proposal.fromJson(_decodeOrThrow(res));
+  }
+
+  Future<Proposal> agentCashOut(
+    String customerAppUserId, {
+    String? agentBmoniUserId,
+    String? agentPayTag,
+    required String amount,
+    required String currency,
+  }) async {
+    final res = await http.post(
+      _uri('/users/$customerAppUserId/agent/cash-out'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        if (agentBmoniUserId != null) 'agentBmoniUserId': agentBmoniUserId,
+        if (agentPayTag != null) 'agentPayTag': agentPayTag,
+        'amount': amount,
+        'currency': currency,
+      }),
+    );
+    return Proposal.fromJson(_decodeOrThrow(res));
+  }
+
+  Future<List<AgentTransaction>> listAgentTransactions(String agentAppUserId) async {
+    final res = await http.get(_uri('/users/$agentAppUserId/agent/transactions'));
+    return _decodeListOrThrow(res)
+        .map((e) => AgentTransaction.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 }

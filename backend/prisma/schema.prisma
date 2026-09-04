@@ -5,9 +5,12 @@
 // Phase 2 adds KycProfile (local mirror of KYC submission progress — the
 // actual documents/decisions live in BMONI, this just tracks what we've
 // submitted so the wizard UI can resume) and RailOnboarding (per-currency
-// onboarding state for NGN/USD). Later phases add PayTag directory,
-// savings goals, loans, split bills, and escrow tables — do not add them
-// here ahead of the phase that needs them.
+// onboarding state for NGN/USD). Phase 3 adds PayTag and TransferProposal.
+// Phase 4 adds the microfinance layer (SavingsGoal/SavingsContribution,
+// LoanApplication/LoanRepayment, AgentTransaction) — see the comment
+// above those models for why they're pure app-layer, no BMONI
+// equivalent. Phase 5 adds split bills and escrow tables — do not add
+// them here ahead of that phase.
 
 generator client {
   provider = "prisma-client-js"
@@ -31,15 +34,24 @@ model AppUser {
   // never stored here or anywhere else server-side.
   ownerAddress  String?
 
+  // Agent mode (Phase 4) — a regular AppUser flagged to run cash-in/
+  // cash-out for other users. Not a separate account type; any user can
+  // become an agent (see AgentService.setAgentStatus).
+  isAgent       Boolean  @default(false)
+
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  smartWallets      SmartWallet[]
-  webhookEvents     WebhookEvent[]
-  kycProfile        KycProfile?
-  railOnboardings   RailOnboarding[]
-  payTag            PayTag?
-  transferProposals TransferProposal[]
+  smartWallets       SmartWallet[]
+  webhookEvents      WebhookEvent[]
+  kycProfile         KycProfile?
+  railOnboardings    RailOnboarding[]
+  payTag             PayTag?
+  transferProposals  TransferProposal[]
+  savingsGoals       SavingsGoal[]
+  loanApplications   LoanApplication[]
+  agentTransactionsAsAgent    AgentTransaction[] @relation("AgentTransactionsAsAgent")
+  agentTransactionsAsCustomer AgentTransaction[] @relation("AgentTransactionsAsCustomer")
 }
 
 model SmartWallet {
@@ -155,4 +167,117 @@ model TransferProposal {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// Phase 4 — microfinance layer. Everything below is pure PayFlex
+// invention (build brief section 3: BMONI has no savings/loan/agent
+// primitives at all) built on top of the TransferService proposal flow.
+//
+// Savings goals: an app-level ledger, NOT an on-chain escrow — periodic
+// contributions are ordinary signed TRANSFERs from the user's own wallet
+// to PayFlex's treasury account (see src/treasury/). The scheduler below
+// can only ever mark a contribution DUE; it cannot execute one, because
+// BMONI's signing model ties every transfer to the sender's own
+// on-device key — there is no delegated/pre-authorized debit mechanism.
+// "Scheduled transfer jobs" in the brief means "the backend decides when
+// a contribution is due and the app prompts the user to sign it next
+// time they're in the app," not silent background execution.
+model SavingsGoal {
+  id        String  @id @default(uuid())
+  appUserId String
+  appUser   AppUser @relation(fields: [appUserId], references: [id])
+
+  name               String
+  currency           String
+  targetAmount       String
+  contributionAmount String
+  frequency          String // "DAILY" | "WEEKLY" | "MONTHLY"
+  nextContributionAt DateTime
+  status             String @default("ACTIVE") // ACTIVE | PAUSED | COMPLETED
+  totalContributed   String @default("0")
+
+  contributions SavingsContribution[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SavingsContribution {
+  id            String      @id @default(uuid())
+  savingsGoalId String
+  savingsGoal   SavingsGoal @relation(fields: [savingsGoalId], references: [id])
+
+  amount          String
+  status          String    @default("DUE") // DUE | PROPOSED | CONFIRMED | FAILED
+  bmoniProposalId String?
+  dueAt           DateTime
+  completedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Loans: LoanService scores an applicant purely off their BMONI
+// transaction history (GET transactions/{smartWalletId}) via a pluggable
+// CreditScoringStrategy — see src/loans/credit-scoring/. An approved
+// loan disburses immediately because PayFlex's own treasury account
+// signs the disbursement server-side (it's PayFlex's money moving under
+// PayFlex's own authority, unlike every other transfer in this app,
+// which requires the end user's live on-device signature).
+model LoanApplication {
+  id        String  @id @default(uuid())
+  appUserId String
+  appUser   AppUser @relation(fields: [appUserId], references: [id])
+
+  requestedAmount        String
+  currency               String
+  status                 String  @default("PENDING") // PENDING | APPROVED | REJECTED | DISBURSED | REPAYING | CLOSED
+  approvedAmount         String?
+  creditScore            Int?
+  scoringReasoning       Json?
+  disbursementProposalId String?
+
+  repayments LoanRepayment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model LoanRepayment {
+  id                String          @id @default(uuid())
+  loanApplicationId String
+  loanApplication   LoanApplication @relation(fields: [loanApplicationId], references: [id])
+
+  amount          String
+  dueAt           DateTime
+  status          String    @default("DUE") // DUE | PROPOSED | PAID
+  bmoniProposalId String?
+  paidAt          DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Agent mode: cash-in (agent's wallet -> customer's wallet, agent
+// received physical cash) and cash-out (customer's wallet -> agent's
+// wallet, agent hands over physical cash) are ordinary TransferService
+// transfers — this table exists purely so an agent has their own
+// reconciliation ledger distinct from a regular user's transaction list.
+model AgentTransaction {
+  id String @id @default(uuid())
+
+  agentAppUserId String
+  agent          AppUser @relation("AgentTransactionsAsAgent", fields: [agentAppUserId], references: [id])
+
+  customerAppUserId   String?
+  customer            AppUser? @relation("AgentTransactionsAsCustomer", fields: [customerAppUserId], references: [id])
+  customerBmoniUserId String
+
+  type            String // "CASH_IN" | "CASH_OUT"
+  amount          String
+  currency        String
+  bmoniProposalId String
+  status          String @default("PENDING")
+
+  createdAt DateTime @default(now())
 }
