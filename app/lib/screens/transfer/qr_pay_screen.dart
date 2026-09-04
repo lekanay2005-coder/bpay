@@ -4,6 +4,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../models/app_user.dart';
 import '../../services/api_client.dart';
 import '../../services/transfer_flow.dart';
+import '../../services/retry.dart';
 
 /// Build brief section 4.1 — QR Pay. The QR payload is a short-lived,
 /// HMAC-signed token minted by the backend (QrPayService); this screen
@@ -131,8 +132,10 @@ class _ScanToPayTab extends StatefulWidget {
 class _ScanToPayTabState extends State<_ScanToPayTab> {
   final _api = ApiClient();
   bool _handled = false;
+  bool _offline = false;
   String? _error;
   String? _resultMessage;
+  String? _pendingToken;
 
   Future<void> _onDetect(BarcodeCapture capture) async {
     if (_handled) return;
@@ -140,9 +143,20 @@ class _ScanToPayTabState extends State<_ScanToPayTab> {
     final token = capture.barcodes.first.rawValue;
     if (token == null) return;
     setState(() => _handled = true);
+    await _pay(token);
+  }
 
+  Future<void> _pay(String token) async {
+    setState(() {
+      _offline = false;
+      _error = null;
+      _pendingToken = token;
+    });
     try {
-      final proposal = await _api.payQr(widget.user.id, token);
+      // Offline handling: transport-level failures (no signal mid-scan,
+      // e.g. inside a building) retry a few times before giving up, so a
+      // brief connectivity blip doesn't force a full re-scan.
+      final proposal = await withRetry(() => _api.payQr(widget.user.id, token));
       if (!mounted) return;
       final signed = await signAndSubmitTransfer(context, _api, widget.user.id, proposal.id);
       setState(() {
@@ -150,6 +164,9 @@ class _ScanToPayTabState extends State<_ScanToPayTab> {
             ? 'Cancelled — proposal was created but not signed.'
             : 'Paid ${signed.amount} ${signed.currency}. Status: ${signed.status}.';
       });
+    } on OfflineException catch (e) {
+      setState(() => _offline = true);
+      if (mounted) _error = e.toString();
     } catch (e) {
       setState(() => _error = e.toString());
     }
@@ -157,6 +174,26 @@ class _ScanToPayTabState extends State<_ScanToPayTab> {
 
   @override
   Widget build(BuildContext context) {
+    if (_offline) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.wifi_off, size: 48),
+              const SizedBox(height: 12),
+              Text(_error ?? "You're offline.", textAlign: TextAlign.center),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: () => _pay(_pendingToken!),
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     if (_resultMessage != null || _error != null) {
       return Center(
         child: Padding(

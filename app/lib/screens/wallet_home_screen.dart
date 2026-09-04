@@ -2,17 +2,22 @@ import 'package:flutter/material.dart';
 import '../models/app_user.dart';
 import '../models/kyc.dart';
 import '../services/api_client.dart';
+import '../services/retry.dart';
 import 'transfer/send_money_screen.dart';
 import 'transfer/qr_pay_screen.dart';
 import 'transfer/paytag_screen.dart';
 import 'savings/savings_screen.dart';
 import 'loans/loans_screen.dart';
 import 'agent/agent_screen.dart';
+import 'split_bill/split_bill_screen.dart';
+import 'links/send_via_link_screen.dart';
+import 'stub_rails_screen.dart';
 
 /// Phase 2: real balances + transaction history, fetched fresh from the
 /// backend rather than relying on a wallet object passed in at creation
 /// time. Phase 3 adds send/QR Pay/PayTag entry points. Phase 4 adds
-/// savings/loans/agent mode via the overflow menu.
+/// savings/loans/agent mode via the overflow menu. Phase 5 adds split
+/// bills, send-via-link, and CAD/EUR/MXN stubs to the same menu.
 class WalletHomeScreen extends StatefulWidget {
   final AppUser user;
   const WalletHomeScreen({super.key, required this.user});
@@ -26,6 +31,7 @@ class _WalletHomeScreenState extends State<WalletHomeScreen> {
   List<SmartWallet> _wallets = [];
   Map<String, Balance> _balancesByWalletId = {};
   bool _loading = true;
+  bool _offline = false;
   String? _error;
 
   @override
@@ -37,14 +43,23 @@ class _WalletHomeScreenState extends State<WalletHomeScreen> {
   Future<void> _load() async {
     setState(() {
       _loading = true;
+      _offline = false;
       _error = null;
     });
     try {
-      final wallets = await _api.listWallets(widget.user.id);
-      final balances = await _api.listBalances(widget.user.id);
+      // Offline handling: a stale wallet home from a lost connection reads
+      // as "no wallets," which is misleading — retry transport failures
+      // before surfacing an error, per build brief's Phase 5 polish ask.
+      final wallets = await withRetry(() => _api.listWallets(widget.user.id));
+      final balances = await withRetry(() => _api.listBalances(widget.user.id));
       setState(() {
         _wallets = wallets;
         _balancesByWalletId = {for (final b in balances) b.smartWalletId: b};
+      });
+    } on OfflineException catch (e) {
+      setState(() {
+        _offline = true;
+        _error = e.toString();
       });
     } catch (e) {
       setState(() => _error = e.toString());
@@ -73,6 +88,9 @@ class _WalletHomeScreenState extends State<WalletHomeScreen> {
                 'savings' => SavingsScreen(user: widget.user),
                 'loans' => LoansScreen(user: widget.user),
                 'agent' => AgentScreen(user: widget.user),
+                'split-bill' => SplitBillScreen(user: widget.user),
+                'send-via-link' => SendViaLinkScreen(user: widget.user),
+                'more-currencies' => const StubRailsScreen(),
                 _ => null,
               };
               if (screen != null) {
@@ -83,6 +101,9 @@ class _WalletHomeScreenState extends State<WalletHomeScreen> {
               PopupMenuItem(value: 'savings', child: Text('Savings goals')),
               PopupMenuItem(value: 'loans', child: Text('Loans')),
               PopupMenuItem(value: 'agent', child: Text('Agent mode')),
+              PopupMenuItem(value: 'split-bill', child: Text('Split bills')),
+              PopupMenuItem(value: 'send-via-link', child: Text('Send via link')),
+              PopupMenuItem(value: 'more-currencies', child: Text('More currencies')),
             ],
           ),
         ],
@@ -120,7 +141,16 @@ class _WalletHomeScreenState extends State<WalletHomeScreen> {
                   Text('BMONI user: ${widget.user.bmoniUserId}',
                       style: Theme.of(context).textTheme.bodySmall),
                   const SizedBox(height: 16),
-                  if (_error != null)
+                  if (_offline)
+                    Card(
+                      color: Colors.orange.shade50,
+                      child: ListTile(
+                        leading: const Icon(Icons.wifi_off, color: Colors.orange),
+                        title: Text(_error ?? "You're offline."),
+                        trailing: TextButton(onPressed: _load, child: const Text('Retry')),
+                      ),
+                    )
+                  else if (_error != null)
                     Text(_error!, style: const TextStyle(color: Colors.red)),
                   if (_wallets.isEmpty && _error == null)
                     const Text('No smart wallets yet.'),

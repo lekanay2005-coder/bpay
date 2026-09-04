@@ -42,4 +42,42 @@ export class OnboardingController {
   vbaUsdStatus(@Param('id') id: string) {
     return this.onboarding.getVbaUsdStatus(id);
   }
+
+  // --- CAD/EUR/MXN stubs (Phase 5) — see OnboardingService's comment.
+  // Deliberately no DTO class validation here (unlike every other
+  // endpoint in this codebase) — these bodies aren't fully modeled since
+  // there's no CAD/EUR/MXN UI driving them yet; the raw body is passed
+  // straight through to BMONI, which will 400 with the real required
+  // field list if it's wrong.
+
+  @Post('users/:id/onboarding/start-canada')
+  startCanada(
+    @Param('id') id: string,
+    @Body() body: { cadWalletAddress: string; cadWalletIndex: number },
+  ) {
+    return this.onboarding.startCanada(id, body);
+  }
+
+  @Post('users/:id/onboarding/start-monerium')
+  startMonerium(
+    @Param('id') id: string,
+    @Body() body: { eurWalletAddress: string; eurWalletIndex: number },
+  ) {
+    return this.onboarding.startMonerium(id, body);
+  }
+
+  @Post('users/:id/latam/mx/kyc/activate')
+  activateLatamMxKyc(@Param('id') id: string, @Body() body: Record<string, unknown>) {
+    return this.onboarding.activateLatamMxKyc(id, body);
+  }
+
+  @Get('users/:id/latam/mx/kyc/agreements')
+  latamMxAgreements(@Param('id') id: string) {
+    return this.onboarding.getLatamMxAgreements(id);
+  }
+
+  @Get('users/:id/latam/mx/kyc/status')
+  latamMxKycStatus(@Param('id') id: string) {
+    return this.onboarding.getLatamMxKycStatus(id);
+  }
 }

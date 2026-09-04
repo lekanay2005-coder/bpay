@@ -164,4 +164,37 @@ export class OnboardingService {
     });
     return status;
   }
+
+  // --- CAD/EUR/MXN (Phase 5 stubs — build brief section 2.3 explicitly
+  // asks for these "structurally wired but not UI-polished," unlike
+  // NGN/USD they get no local RailOnboarding persistence or dedicated
+  // Flutter screens; wire the rest properly if/when a phase actually
+  // targets one of these rails. Not exercised against the live sandbox
+  // with the same depth as NGN/USD/transfers — see backend/README.md
+  // "Phase 5 findings.") ---------------------------------------------------
+
+  async startCanada(appUserId: string, body: { cadWalletAddress: string; cadWalletIndex: number }) {
+    const user = await this.users.findById(appUserId);
+    return this.bmoni.startCanada(user.bmoniUserId, body);
+  }
+
+  async startMonerium(appUserId: string, body: { eurWalletAddress: string; eurWalletIndex: number }) {
+    const user = await this.users.findById(appUserId);
+    return this.bmoni.startMonerium(user.bmoniUserId, body);
+  }
+
+  async activateLatamMxKyc(appUserId: string, body: Record<string, unknown>) {
+    const user = await this.users.findById(appUserId);
+    return this.bmoni.activateLatamMxKyc(user.bmoniUserId, body);
+  }
+
+  async getLatamMxAgreements(appUserId: string) {
+    const user = await this.users.findById(appUserId);
+    return this.bmoni.getLatamMxAgreements(user.bmoniUserId);
+  }
+
+  async getLatamMxKycStatus(appUserId: string) {
+    const user = await this.users.findById(appUserId);
+    return this.bmoni.getLatamMxKycStatus(user.bmoniUserId);
+  }
 }

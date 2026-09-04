@@ -6,6 +6,8 @@ import '../models/app_user.dart';
 import '../models/kyc.dart';
 import '../models/transfer.dart';
 import '../models/microfinance.dart';
+import '../models/split_bill.dart';
+import '../models/claimable_link.dart';
 
 class ApiException implements Exception {
   final int statusCode;
@@ -522,5 +524,110 @@ class ApiClient {
     return _decodeListOrThrow(res)
         .map((e) => AgentTransaction.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  // --- Split-bill (Phase 5) ---------------------------------------------------
+  //
+  // Each contributor's "pay" call returns the same Proposal shape as every
+  // other transfer — sign/submit via the normal transfer endpoints.
+
+  Future<({SplitBill splitBill, String qrToken})> createSplitBill(
+    String appUserId, {
+    required String description,
+    required String currency,
+    required String totalAmount,
+    required List<({String? payTag, String? bmoniUserId, String shareAmount})> contributors,
+  }) async {
+    final res = await http.post(
+      _uri('/users/$appUserId/split-bills'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'description': description,
+        'currency': currency,
+        'totalAmount': totalAmount,
+        'contributors': contributors
+            .map((c) => {
+                  if (c.payTag != null) 'payTag': c.payTag,
+                  if (c.bmoniUserId != null) 'bmoniUserId': c.bmoniUserId,
+                  'shareAmount': c.shareAmount,
+                })
+            .toList(),
+      }),
+    );
+    final body = _decodeOrThrow(res);
+    return (
+      splitBill: SplitBill.fromJson(body['splitBill'] as Map<String, dynamic>),
+      qrToken: body['qrToken'] as String,
+    );
+  }
+
+  Future<List<SplitBill>> listSplitBills(String appUserId) async {
+    final res = await http.get(_uri('/users/$appUserId/split-bills'));
+    return _decodeListOrThrow(res)
+        .map((e) => SplitBill.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<SplitBill> getSplitBillByToken(String token) async {
+    final res = await http.get(_uri('/split-bills/qr/$token'));
+    return SplitBill.fromJson(_decodeOrThrow(res));
+  }
+
+  Future<Proposal> paySplitBillShare(String appUserId, String splitBillId) async {
+    final res = await http.post(_uri('/users/$appUserId/split-bills/$splitBillId/pay'));
+    return Proposal.fromJson(_decodeOrThrow(res));
+  }
+
+  // --- Send-via-link / escrow (Phase 5) ---------------------------------------
+  //
+  // *** Liability note (see backend's ClaimableLink model + README): while a
+  // link is ESCROWED, PayFlex is holding a real customer's funds. This is
+  // not "just a feature" — see backend/README.md before changing this flow. ***
+
+  /// Returns either a plain transfer proposal (recipient already has a
+  /// bmoniUserId) or an escrow proposal + claim token — check `type`.
+  Future<
+      ({
+        String type, // "DIRECT_TRANSFER" | "ESCROW"
+        Proposal? proposal, // set when type == DIRECT_TRANSFER
+        Proposal? escrowProposal, // set when type == ESCROW
+        String? claimToken, // set when type == ESCROW
+      })> sendViaLink(
+    String appUserId, {
+    String? toBmoniUserId,
+    required String amount,
+    required String currency,
+  }) async {
+    final res = await http.post(
+      _uri('/users/$appUserId/send-via-link'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        if (toBmoniUserId != null) 'toBmoniUserId': toBmoniUserId,
+        'amount': amount,
+        'currency': currency,
+      }),
+    );
+    final body = _decodeOrThrow(res);
+    final type = body['type'] as String;
+    return (
+      type: type,
+      proposal: type == 'DIRECT_TRANSFER'
+          ? Proposal.fromJson(body['proposal'] as Map<String, dynamic>)
+          : null,
+      escrowProposal: type == 'ESCROW'
+          ? Proposal.fromJson(body['escrowProposal'] as Map<String, dynamic>)
+          : null,
+      claimToken: type == 'ESCROW' ? body['claimToken'] as String : null,
+    );
+  }
+
+  Future<ClaimPreview> previewClaim(String token) async {
+    final res = await http.get(_uri('/claim/$token'));
+    return ClaimPreview.fromJson(_decodeOrThrow(res));
+  }
+
+  Future<void> claimLink(String appUserId, String token) async {
+    final res = await http.post(_uri('/users/$appUserId/claim/$token'));
+    _decodeAnyOrThrow(res);
   }
 }

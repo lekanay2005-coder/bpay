@@ -415,6 +415,83 @@ out clearly, plus a scoring caveat:
   to score against — that's inherent to the approach the brief asks for
   (score off transaction history), not a defect in this implementation.
 
+## Verifying Phase 5 against the live sandbox
+
+```bash
+npm run sandbox:phase5        # split-bill and send-via-link/escrow
+```
+
+`scripts/sandbox-lifecycle-phase5.ts` creates a split bill between two
+contributors (resolved by PayTag), signs both shares, and confirms the
+bill flips to `COMPLETED`; then exercises send-via-link both ways — a
+known recipient (degrades to a normal signed transfer) and an unknown one
+(escrows into PayFlex's treasury, previews the claim, onboards a fresh
+recipient with a wallet, and claims it — **with the treasury signing the
+release server-side**, same pattern as loan disbursement). Run against
+the live sandbox and passes end-to-end.
+
+CAD/EUR/MXN and the error/retry/offline polish were **not** given the
+same live-verification depth as the rest of this build — deliberately,
+matching the brief's own reduced ambition for these ("stubs... not
+UI-polished"). See findings below for what was and wasn't checked.
+
+### Phase 5 findings
+
+- **Split-bill and send-via-link needed no new BMONI endpoints** — both
+  are pure orchestration on top of the Phase 3 transfer primitive
+  (`SplitBillService`/`LinksService`), consistent with the build brief's
+  own framing of them as PayFlex-built, no-BMONI-equivalent features.
+- **`HmacTokenService` was extracted from `QrPayService`** once split-bill
+  QR codes and claim-link tokens needed the exact same short-lived,
+  HMAC-signed, expiry-checked opaque-token mechanics — see
+  `src/common/hmac-token.service.ts`. `QR_SIGNING_SECRET` now signs every
+  app-layer token in this build (QR Pay, split-bill QR, claim links), not
+  just QR Pay ones; nothing to rotate or reconfigure, just a naming note.
+- **Send-via-link's escrow reuses the Phase 4 treasury account** rather
+  than standing up a second PayFlex-controlled BMONI persona — it's the
+  same real-world entity (PayFlex's own custodial wallet) either way, and
+  splitting it into two accounts would only add operational surface
+  (two keys to protect, two balances to reconcile) with no corresponding
+  benefit. `TreasuryService.getWalletId`/`getAppUserId`/`signDigest` are
+  shared unchanged between `LoansService` and `LinksService`.
+- **A claimant needs a wallet in the escrowed currency before they can
+  claim** — confirmed live back in Phase 3 findings (BMONI: "the
+  recipient must hold a wallet in this currency") and re-confirmed here:
+  `scripts/sandbox-lifecycle-phase5.ts`'s recipient is provisioned with an
+  NGN wallet *before* calling `claim()`. This maps directly onto the
+  brief's own instruction to "prompt the recipient to onboard before
+  releasing funds" — it's not just good UX advice, `claim()` will fail
+  against BMONI without it.
+- **CAD/EUR/MXN request bodies are non-empty and rail-specific** — a
+  quick live probe (not full verification) found `start-canada` needs
+  `{ cadWalletAddress, cadWalletIndex }`, `start-monerium` needs
+  `{ eurWalletAddress, eurWalletIndex }` (both mirroring start-nigeria's
+  shape), and `latam/mx/kyc/activate` needs LATAM-specific compound
+  surname fields (`paternalLastName`, `maternalLastName`, ...) rather
+  than the usual firstName/lastName. `BmoniClientService`'s stub methods
+  now require these bodies instead of silently sending nothing (which
+  would always 400) — but `OnboardingService` doesn't yet resolve
+  wallet addresses/indices from local records the way NGN does, matching
+  the brief's "structurally wired but not UI-polished" ask. Finish
+  properly (local wallet resolution, a real Flutter flow, live
+  verification through KYC/activation) if/when a phase actually targets
+  one of these rails.
+- **Error handling was consolidated into one `GlobalExceptionFilter`**
+  (`src/common/global-exception.filter.ts`), replacing the narrower
+  `BmoniExceptionFilter` from Phase 2. It's one `@Catch()` handling four
+  cases explicitly (`BmoniApiError`, `BmoniNetworkError` → 502,
+  `HttpException` pass-through, generic `Error` → opaque 500) rather than
+  registering several `@Catch(SpecificType)` filters and relying on
+  Nest's filter-precedence rules to sort them out correctly.
+- **Flutter-side retry/offline handling** (`app/lib/services/retry.dart`)
+  only retries transport-level failures (`SocketException`,
+  `TimeoutException`, `HttpException` from `dart:io`) — never a real
+  ApiException from the backend, since retrying a 400/404 changes
+  nothing. Wired into the QR-scan-to-pay flow (the brief's explicit
+  example) and the wallet home's initial load; not swept across every
+  other screen's network calls — that would be straightforward
+  copy-paste from here but wasn't judged worth the diff size this pass.
+
 ## Testing
 
 ```bash
@@ -424,4 +501,5 @@ npm run sandbox:phase2        # Phase 2: full NGN KYC wizard + onboarding + wall
 npm run sandbox:kyc-mismatch  # Phase 2: the deliberate BVN/name-mismatch check
 npm run sandbox:phase3        # Phase 3: transfers, QR Pay, PayTag
 npm run sandbox:phase4        # Phase 4: savings, loans + disbursement, agent mode
+npm run sandbox:phase5        # Phase 5: split-bill, send-via-link/escrow
 ```

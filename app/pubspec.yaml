@@ -4,8 +4,9 @@ description: >
   Phase 1: user creation + on-device owner wallet + managed smart wallet
   provisioning. Phase 2: KYC wizard, NGN/USD rail onboarding, wallet home
   balances/history. Phase 3: transfers, QR Pay, PayTag. Phase 4: savings
-  goals, loans, agent mode — all end to end against the PayFlex
-  orchestration backend.
+  goals, loans, agent mode. Phase 5: split bills, send-via-link/escrow,
+  CAD/EUR/MXN stubs — all end to end against the PayFlex orchestration
+  backend.
 publish_to: 'none'
 version: 0.1.0
 

@@ -278,16 +278,31 @@ export class BmoniClientService {
     return this.request({ method: 'GET', url: BmoniPaths.vbaUsd(userId) });
   }
 
-  startCanada(userId: string): Promise<unknown> {
-    return this.request({ method: 'POST', url: BmoniPaths.startCanada(userId) });
+  /**
+   * Confirmed live (2026-09-04) the body is required —
+   * `{ cadWalletAddress, cadWalletIndex }`, mirroring start-nigeria's
+   * shape. Stub-quality per the brief: OnboardingService.startCanada
+   * doesn't yet resolve these from a local CAD wallet the way NGN does
+   * (there's no CAD onboarding UI to drive it), so callers must pass
+   * them through for now.
+   */
+  startCanada(userId: string, body: { cadWalletAddress: string; cadWalletIndex: number }): Promise<unknown> {
+    return this.request({ method: 'POST', url: BmoniPaths.startCanada(userId), data: body });
   }
 
-  startMonerium(userId: string): Promise<unknown> {
-    return this.request({ method: 'POST', url: BmoniPaths.startMonerium(userId) });
+  /** Confirmed live: body required, `{ eurWalletAddress, eurWalletIndex }` — same caveat as startCanada. */
+  startMonerium(userId: string, body: { eurWalletAddress: string; eurWalletIndex: number }): Promise<unknown> {
+    return this.request({ method: 'POST', url: BmoniPaths.startMonerium(userId), data: body });
   }
 
-  activateLatamMxKyc(userId: string): Promise<unknown> {
-    return this.request({ method: 'POST', url: BmoniPaths.latamMxKycActivate(userId) });
+  /**
+   * Confirmed live: body required and LATAM-specific —
+   * `{ paternalLastName, maternalLastName, ... }` (compound Spanish
+   * surnames, not just firstName/lastName). Not fully modeled here; pass
+   * whatever the caller has. Stub-quality per the brief.
+   */
+  activateLatamMxKyc(userId: string, body: Record<string, unknown>): Promise<unknown> {
+    return this.request({ method: 'POST', url: BmoniPaths.latamMxKycActivate(userId), data: body });
   }
 
   getLatamMxAgreements(userId: string): Promise<LatamMxAgreementsResponse> {

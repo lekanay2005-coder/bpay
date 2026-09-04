@@ -8,6 +8,13 @@ network, and a QR-first transfer UX on top of BMONI's smart-wallet rails.
 Full spec: [`docs/BUILD_PROMPT.md`](docs/BUILD_PROMPT.md). This README
 tracks what's actually been built against that spec.
 
+All five build phases are implemented and, with the exceptions called out
+per-phase below (USD KYC needing a real device camera; a few endpoints
+this sandbox genuinely can't complete — crypto deposit, NGN bank
+verification, CAD/EUR/MXN), verified end to end against the live BMONI
+sandbox rather than mocked. The Flutter app has not been run on an actual
+device/emulator in this environment — see the note near the bottom.
+
 ## Architecture, in one paragraph
 
 BMONI Embedded is **not** built on Stellar — it's EVM-based managed smart
@@ -56,10 +63,17 @@ transfer primitive above):
   `IBillPaymentProvider` interface for a real aggregator later.
 - **Claimable payment links for non-users** — BMONI has no
   claimable-balance primitive. Funds for a recipient without a BMONI
-  account sit in a PayFlex-controlled escrow smart wallet until the
-  recipient onboards. **This is a real liability/compliance surface**,
-  not a shortcut — treat any escrow balance as PayFlex-held customer
-  funds, not BMONI-custodied funds, when this ships (Phase 5).
+  account sit in PayFlex's own treasury account (the same one loan
+  disbursement uses) until the recipient onboards and claims them.
+  **This is a real liability/compliance surface, not a shortcut** —
+  while a link is `ESCROWED`, PayFlex is holding a real customer's funds
+  in its own custodial account; a production deployment needs to
+  reconcile and disclose that balance per whatever e-money/custody
+  regulation applies in its jurisdiction, for as long as it sits
+  unclaimed. **Done** (Phase 5), including a live-verified claim where
+  the treasury signs the release server-side — see
+  `backend/prisma/schema.prisma`'s `ClaimableLink` doc comment and
+  `backend/README.md` "Phase 5 findings" before touching this code.
 - **PayTag directory** (`@handle` → `bmoniUserId`) — our own Postgres
   table, resolved before every transfer that uses it. **Done** (Phase 3).
 - **QR Pay** — a short-lived, HMAC-signed QR payload naming a
@@ -67,6 +81,7 @@ transfer primitive above):
   primitive below. **Done** (Phase 3).
 - **Split-bill orchestration** — BMONI has no group-payment primitive;
   it's independent per-contributor proposals tracked in our own table.
+  **Done** (Phase 5).
 
 ## Build status
 
@@ -76,7 +91,7 @@ transfer primitive above):
 | 2 — KYC + onboarding (NGN, USD) | **Done for NGN, verified against the live sandbox; USD wired but blocked on a real device camera** — see below |
 | 3 — Transfers (QR, PayTag, deposits, NGN withdrawal) | **Transfers/QR/PayTag done, verified against the live sandbox; deposits and NGN withdrawal wired but blocked on sandbox limitations** — see below |
 | 4 — Microfinance layer (savings, loans, agent mode) | **Done, verified against the live sandbox — including a real server-side treasury signature for loan disbursement** — see below |
-| 5 — Polish (split-bill, send-via-link/escrow, CAD/EUR/MXN stubs) | Not started |
+| 5 — Polish (split-bill, send-via-link/escrow, CAD/EUR/MXN stubs) | **Split-bill and send-via-link/escrow done, verified against the live sandbox; CAD/EUR/MXN are light stubs and error/retry/offline polish is applied selectively, both by design** — see below |
 
 Phase 1 was run end-to-end against `https://embedded-dev.bmoni.com` (not
 mocked): user creation, on-device owner wallet, owner-proof challenge,
@@ -142,7 +157,24 @@ config-validation bug (treasury setup throwing at app-boot, which would
 have made it impossible to ever provision the treasury) caught and fixed
 during this phase.
 
-The Flutter app is scaffolded and wired for all four phases, written
+Phase 5 closes out the build brief: split-bill (create a bill split
+across contributors resolved by PayTag, each contributor's share an
+independent signed transfer, the bill auto-completing once every share is
+paid) and send-via-link were both run end-to-end against the live
+sandbox, including the escrow path — an unknown recipient's funds route
+into PayFlex's treasury, and a freshly-onboarded recipient claims them
+with **the treasury signing the release server-side**, the same pattern
+Phase 4's loan disbursement established. `HmacTokenService` was pulled
+out of `QrPayService` once split-bill QR codes and claim links needed the
+identical short-lived-signed-token mechanics. CAD/EUR/MXN got a light
+live probe (not full verification, matching the brief's own reduced
+ambition for these) confirming their real, rail-specific request bodies;
+error handling was consolidated into one `GlobalExceptionFilter`; and
+retry/offline handling was added to the QR-scan-to-pay flow the brief
+calls out by name, plus the wallet home's initial load — not swept across
+every screen. See `backend/README.md` "Phase 5 findings" for the details.
+
+The Flutter app is scaffolded and wired for all five phases, written
 against the real `bmoni_embedded_sdk` v0.0.2 API (inspected from its
 pub.dev package, not guessed) and the backend's confirmed-live HTTP
 contract, but **has not been run** — this environment has no Flutter/Dart
@@ -163,6 +195,7 @@ npm run sandbox:kyc-mismatch # the deliberate BVN/name-mismatch check
 npm run sandbox:phase3       # re-verify Phase 3 transfers, QR Pay, PayTag
 npm run provision:treasury   # one-time: create PayFlex's treasury BMONI account
 npm run sandbox:phase4       # re-verify Phase 4 savings, loans, agent mode
+npm run sandbox:phase5       # re-verify Phase 5 split-bill, send-via-link/escrow
 ```
 
 ```bash

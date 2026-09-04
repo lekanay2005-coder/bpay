@@ -9,8 +9,10 @@
 // Phase 4 adds the microfinance layer (SavingsGoal/SavingsContribution,
 // LoanApplication/LoanRepayment, AgentTransaction) — see the comment
 // above those models for why they're pure app-layer, no BMONI
-// equivalent. Phase 5 adds split bills and escrow tables — do not add
-// them here ahead of that phase.
+// equivalent. Phase 5 adds split bills (SplitBill/SplitBillContributor)
+// and the send-via-link escrow ledger (ClaimableLink) — see the comment
+// above ClaimableLink in particular before touching that table; it's a
+// real liability surface, not just a data model.
 
 generator client {
   provider = "prisma-client-js"
@@ -52,6 +54,10 @@ model AppUser {
   loanApplications   LoanApplication[]
   agentTransactionsAsAgent    AgentTransaction[] @relation("AgentTransactionsAsAgent")
   agentTransactionsAsCustomer AgentTransaction[] @relation("AgentTransactionsAsCustomer")
+  splitBillsCreated           SplitBill[]
+  splitBillContributions      SplitBillContributor[]
+  claimableLinksSent          ClaimableLink[]         @relation("ClaimableLinksSent")
+  claimableLinksClaimed       ClaimableLink[]         @relation("ClaimableLinksClaimed")
 }
 
 model SmartWallet {
@@ -280,4 +286,82 @@ model AgentTransaction {
   status          String @default("PENDING")
 
   createdAt DateTime @default(now())
+}
+
+// Phase 5 — split-bill (build brief section 4.3): orchestration only.
+// BMONI has no group-payment primitive, so this is a plain PayFlex table
+// tracking who owes what; each contributor's payment is an entirely
+// independent TransferService proposal signed by that contributor, same
+// as any other transfer. A shared, HMAC-signed QR (HmacTokenService)
+// carries the splitBillId so a scanning contributor's app can look up
+// their own share.
+model SplitBill {
+  id              String  @id @default(uuid())
+  creatorAppUserId String
+  creator         AppUser @relation(fields: [creatorAppUserId], references: [id])
+
+  description   String
+  currency      String
+  totalAmount   String
+  status        String @default("ACTIVE") // ACTIVE | COMPLETED | CANCELLED
+
+  contributors SplitBillContributor[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SplitBillContributor {
+  id          String    @id @default(uuid())
+  splitBillId String
+  splitBill   SplitBill @relation(fields: [splitBillId], references: [id])
+
+  appUserId       String
+  appUser         AppUser @relation(fields: [appUserId], references: [id])
+  shareAmount     String
+  status          String  @default("PENDING") // PENDING | PROPOSED | PAID
+  bmoniProposalId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([splitBillId, appUserId])
+}
+
+// Phase 5 — send-via-link (build brief section 4.4 / section 3): BMONI
+// has NO claimable-balance primitive. When the recipient doesn't have a
+// bmoniUserId yet, funds are held in PayFlex's own treasury account (the
+// same one loan disbursement uses — see src/treasury/) until the
+// recipient completes onboarding and claims them.
+//
+// *** LIABILITY / COMPLIANCE NOTE (per the build brief, not to be
+// implemented quietly): while a link is ESCROWED, PayFlex is holding a
+// real customer's funds in its own custodial account — this is PayFlex
+// becoming a money holder for that balance, not just a technical relay.
+// A real deployment needs to treat every ESCROWED ClaimableLink as
+// PayFlex-held customer liability on its books (reconciled, insured,
+// disclosed per applicable e-money/custody regulation in whatever
+// jurisdiction it operates) for as long as it sits unclaimed — this
+// table is not a substitute for that compliance work, only the ledger
+// it would be built on top of. See README "Send-via-link is a real
+// liability surface" for the full writeup. ***
+model ClaimableLink {
+  id     String  @id @default(uuid())
+  senderAppUserId String
+  sender AppUser @relation("ClaimableLinksSent", fields: [senderAppUserId], references: [id])
+
+  amount   String
+  currency String
+  status   String @default("PENDING_ESCROW") // PENDING_ESCROW | ESCROWED | CLAIMED | EXPIRED
+
+  escrowProposalId  String? // sender's wallet -> treasury
+  releaseProposalId String? // treasury -> claimant's wallet
+
+  claimedByAppUserId String?
+  claimedBy          AppUser? @relation("ClaimableLinksClaimed", fields: [claimedByAppUserId], references: [id])
+  claimedAt          DateTime?
+
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

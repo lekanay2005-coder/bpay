@@ -21,6 +21,7 @@
     "sandbox:kyc-mismatch": "ts-node -r tsconfig-paths/register scripts/kyc-bvn-mismatch-check.ts",
     "sandbox:phase3": "ts-node -r tsconfig-paths/register scripts/sandbox-lifecycle-phase3.ts",
     "sandbox:phase4": "ts-node -r tsconfig-paths/register scripts/sandbox-lifecycle-phase4.ts",
+    "sandbox:phase5": "ts-node -r tsconfig-paths/register scripts/sandbox-lifecycle-phase5.ts",
     "provision:treasury": "ts-node -r tsconfig-paths/register scripts/provision-treasury.ts"
   },
   "dependencies": {

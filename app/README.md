@@ -23,6 +23,13 @@ the same transfer sign/submit flow. Loan disbursement is the one
 exception: it's signed by PayFlex's own treasury account server-side, so
 there's nothing to sign on the borrower's side for that particular step.
 
+Phase 5: split bills (create one with contributors by PayTag, each pays
+their own share), send-via-link (a known recipient gets a plain transfer;
+an unknown one routes through PayFlex's own escrow — see the in-app
+notice before you assume that's "just like QR Pay"), a light CAD/EUR/MXN
+stub screen, and retry/offline handling on the QR-scan-to-pay flow and
+the wallet home's initial load.
+
 > **Not run in this environment.** The sandbox this was built in has no
 > Flutter/Dart SDK installed, so this code has not been through
 > `flutter pub get` / `flutter analyze` / `flutter run`. It was written and
@@ -136,6 +143,38 @@ flutter run --dart-define=BACKEND_BASE_URL=http://10.0.2.2:3000
     sender — you received physical cash) or cash-out (the current user is
     the sender — they're handing digital funds to an agent for cash), and
     view the agent's own transaction ledger.
+12. `SplitBillScreen` (Phase 5) — create a bill with contributors named
+    by PayTag; each contributor sees their own pending share and pays it
+    via the shared sign/submit helper, same as any other transfer.
+13. `SendViaLinkScreen` (Phase 5) — a Send tab (plain transfer if you give
+    a known recipient's BMONI user ID; otherwise an escrow proposal you
+    sign, plus a claim token to share) and a Claim tab (preview a token's
+    amount/sender/status, then claim once you have a wallet in that
+    currency). **This screen shows an explicit on-screen notice about the
+    escrow** before the user sends to an unknown recipient — see
+    `../backend/README.md` and the `ClaimableLink` model's doc comment in
+    `backend/prisma/schema.prisma` for why this isn't "just a feature":
+    PayFlex is holding a real customer's funds in its own account for as
+    long as a link sits unclaimed.
+14. `StubRailsScreen` (Phase 5) — a plain "coming soon" list for
+    CAD/EUR/MXN, matching the build brief's own reduced ambition for
+    these three rails ("structurally wired but not UI-polished").
+
+## Error handling, retry, and offline (Phase 5 polish)
+
+- `lib/services/retry.dart`'s `withRetry` retries only transport-level
+  failures (no connection, DNS failure, timeout) a few times before
+  giving up — never a real server-returned error, since retrying a
+  400/404 changes nothing. Wired into the QR-scan-to-pay flow (the build
+  brief's explicit example — scanning indoors with a weak signal
+  shouldn't force a full re-scan) and the wallet home's initial load.
+  Not swept across every other screen's network calls in this pass.
+- Every other screen's `catch (e)` just surfaces `e.toString()` — for an
+  `ApiException` that's the backend's real message (which, for a
+  `BmoniApiError`, is BMONI's own message via the backend's
+  `GlobalExceptionFilter` — see `../backend/README.md`); there's no
+  attempt at friendlier copy per error type beyond the QR/wallet-home
+  offline case above.
 
 ## Explicitly deferred (see docs/BUILD_PROMPT.md section 4)
 
