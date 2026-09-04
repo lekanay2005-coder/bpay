@@ -1,9 +1,15 @@
 # PayFlex mobile app (Flutter)
 
-Phase 1 scope: create a PayFlex account, provision an on-device EVM owner
+Phase 1: create a PayFlex account, provision an on-device EVM owner
 wallet via `bmoni_embedded_sdk`, and provision a managed smart wallet —
 mirroring backend/scripts/sandbox-lifecycle.ts but through the real UI and
 real on-device signing instead of a simulated signer.
+
+Phase 2: a KYC wizard mirroring the backend's fixed call order (options ->
+occupations -> 3 documents -> profile PATCH -> readiness -> activate),
+then NGN or USD rail onboarding depending on which currency the Phase 1
+wallet was created for, then a wallet home screen with real balances and
+transaction history.
 
 > **Not run in this environment.** The sandbox this was built in has no
 > Flutter/Dart SDK installed, so this code has not been through
@@ -17,8 +23,21 @@ real on-device signing instead of a simulated signer.
 
 ## Run
 
+This repo currently holds only the Dart application code (`lib/` +
+`pubspec.yaml`) — there is no `flutter create` in this environment, so the
+`android/`/`ios/` platform folders don't exist yet. One-time setup on a
+machine with the Flutter SDK installed:
+
 ```bash
+flutter create --org com.payflex --project-name payflex .   # adds android/ios/ without touching lib/ or pubspec.yaml
 flutter pub get
+
+# Camera permission is required for the Phase 2 KYC capture screens
+# (image_picker) — add to android/app/src/main/AndroidManifest.xml:
+#   <uses-permission android:name="android.permission.CAMERA" />
+# and to ios/Runner/Info.plist:
+#   <key>NSCameraUsageDescription</key>
+#   <string>PayFlex needs your camera to verify your identity documents.</string>
 
 # Point at your locally running backend (see ../backend/README.md).
 # 10.0.2.2 is the Android emulator's alias for the host's localhost;
@@ -40,7 +59,7 @@ flutter run --dart-define=BACKEND_BASE_URL=http://10.0.2.2:3000
   (`SharedPreferences`) so the app skips straight to the wallet home screen
   on relaunch instead of re-running account creation.
 
-## Flow implemented in Phase 1
+## Flow implemented
 
 1. `CreateUserScreen` — collects firstName/lastName/email/phoneNumber (E.164),
    posts to the backend's `POST /users`.
@@ -50,8 +69,28 @@ flutter run --dart-define=BACKEND_BASE_URL=http://10.0.2.2:3000
    stablecoin, requests an owner-proof challenge, signs it on-device
    (`BmoniEmbeddedSdk.signMessage`), and submits the signature to create
    the managed smart wallet.
-3. `WalletHomeScreen` — stub showing the provisioned wallet and onboarding
-   status. Balances, transaction history, and transfers land in Phases 2-3.
+3. `KycWizardScreen` (Phase 2) — personal info + address + employment form,
+   camera capture + upload for the identification document, proof of
+   address, and a selfie, a readiness check, then KYC activation. Two
+   confirmed-live quirks this screen deliberately works around (see
+   `../backend/README.md` "Phase 2 findings" for the full detail):
+   the identification-document type enum shown in the picker is the one
+   the *upload* endpoint accepts, not `GET kyc/options`' `identificationTypes`
+   (they don't match); and `sumsubLevelName` is hardcoded to
+   `"id-and-liveness"` with a comment explaining that BMONI's valid-value
+   set for that field is dynamic, and a 400 will surface the current set
+   verbatim if this ever stops working.
+4. Rail onboarding, branching on the wallet's currency: a BVN field for
+   NGN (`POST start-nigeria`, then polling `onboarding/status` until
+   `anchorStatus` is `"active"` — confirmed live to take a few seconds,
+   not instant), or a single button for USD (`POST start-usa`) — **the USD
+   path cannot be completed from an emulator with a placeholder image**;
+   BMONI runs a real Sumsub check and returns 422
+   `BAD_SELFIE`/`DOCUMENT_PAGE_MISSING` against anything that isn't an
+   actual photo, so this needs a real device camera to verify.
+5. `WalletHomeScreen` — real balances and, per wallet, a transaction
+   history screen, fetched from the backend's wallet-home endpoints.
+   Transfers land in Phase 3.
 
 ## Explicitly deferred (see docs/BUILD_PROMPT.md section 4)
 

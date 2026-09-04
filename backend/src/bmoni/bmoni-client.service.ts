@@ -19,19 +19,25 @@ import {
   SupportedCurrenciesResponse,
 } from './dto/smart-wallets.dto';
 import {
+  BiometricType,
   BvnLookupResponse,
   IdentificationDocumentRequest,
   KycActivateRequest,
+  KycActivateResponse,
+  KycDocumentResponse,
   KycOccupation,
   KycOptionsResponse,
   KycPatchRequest,
+  KycPatchResponse,
   KycReadinessResponse,
+  ProofOfAddressType,
   UsdReadinessResponse,
 } from './dto/kyc.dto';
 import {
   LatamMxAgreementsResponse,
   LatamMxKycStatusResponse,
   StartNigeriaRequest,
+  StartNigeriaResponse,
   StartUsaRequest,
   StartUsaResponse,
   VbaUsdStatusResponse,
@@ -100,6 +106,7 @@ export class BmoniClientService {
             body?.error,
             body?.message,
             config.url ?? '',
+            err.response.data,
           );
         }
         throw new BmoniNetworkError(config.url ?? '', err);
@@ -171,25 +178,32 @@ export class BmoniClientService {
     userId: string,
     fields: IdentificationDocumentRequest,
     file: { buffer: Buffer; filename: string; contentType: string },
-  ): Promise<unknown> {
-    return this.postMultipart(BmoniPaths.kycDocIdentification(userId), fields, file);
+  ): Promise<KycDocumentResponse> {
+    // Confirmed live: the file field is named `files`, and BMONI rejects
+    // anything under ~2KB with a distinct "file too small" error — don't
+    // wire this up to a 1x1 placeholder image in tests.
+    return this.postMultipart(BmoniPaths.kycDocIdentification(userId), fields, file, 'files');
   }
 
   submitProofOfAddress(
     userId: string,
+    type: ProofOfAddressType,
     file: { buffer: Buffer; filename: string; contentType: string },
-  ): Promise<unknown> {
-    return this.postMultipart(BmoniPaths.kycDocProofOfAddress(userId), {}, file);
+  ): Promise<KycDocumentResponse> {
+    return this.postMultipart(BmoniPaths.kycDocProofOfAddress(userId), { type }, file, 'files');
   }
 
   submitBiometric(
     userId: string,
+    type: BiometricType,
     file: { buffer: Buffer; filename: string; contentType: string },
-  ): Promise<unknown> {
-    return this.postMultipart(BmoniPaths.kycDocBiometric(userId), {}, file);
+  ): Promise<KycDocumentResponse> {
+    // Confirmed live: this endpoint's file field is named `selfie`, unlike
+    // the other two document endpoints (`files`) — don't unify them.
+    return this.postMultipart(BmoniPaths.kycDocBiometric(userId), { type }, file, 'selfie');
   }
 
-  patchKyc(userId: string, body: KycPatchRequest): Promise<unknown> {
+  patchKyc(userId: string, body: KycPatchRequest): Promise<KycPatchResponse> {
     return this.request({ method: 'PATCH', url: BmoniPaths.kycPatch(userId), data: body });
   }
 
@@ -197,9 +211,10 @@ export class BmoniClientService {
     return this.request({ method: 'GET', url: BmoniPaths.kycReadiness(userId) });
   }
 
-  activateKyc(userId: string, body?: KycActivateRequest): Promise<unknown> {
-    // Per the brief: omit the body entirely for CAD/NGN. Passing `undefined`
-    // here means axios sends no request body at all, not `{}`.
+  activateKyc(userId: string, body: KycActivateRequest): Promise<KycActivateResponse> {
+    // Confirmed live: sumsubLevelName is required — BMONI does NOT accept
+    // an omitted body here despite what the brief says for CAD/NGN. See
+    // the KycActivateRequest doc comment.
     return this.request({ method: 'POST', url: BmoniPaths.kycActivate(userId), data: body });
   }
 
@@ -217,21 +232,22 @@ export class BmoniClientService {
     return this.request({ method: 'GET', url: BmoniPaths.kycBvnLookup(userId, bvn) });
   }
 
-  private async postMultipart(
+  private async postMultipart<T>(
     url: string,
     fields: object,
     file: { buffer: Buffer; filename: string; contentType: string },
-  ): Promise<unknown> {
+    fileFieldName: string,
+  ): Promise<T> {
     const FormData = (await import('form-data')).default;
     const form = new FormData();
     for (const [key, value] of Object.entries(fields as Record<string, unknown>)) {
       if (value !== undefined) form.append(key, String(value));
     }
-    form.append('file', file.buffer, {
+    form.append(fileFieldName, file.buffer, {
       filename: file.filename,
       contentType: file.contentType,
     });
-    return this.request({
+    return this.request<T>({
       method: 'POST',
       url,
       data: form,
@@ -241,7 +257,7 @@ export class BmoniClientService {
 
   // --- Rail-specific onboarding (section 2.3) --------------------------------
 
-  startNigeria(userId: string, body: StartNigeriaRequest): Promise<unknown> {
+  startNigeria(userId: string, body: StartNigeriaRequest): Promise<StartNigeriaResponse> {
     return this.request({ method: 'POST', url: BmoniPaths.startNigeria(userId), data: body });
   }
 
@@ -366,8 +382,16 @@ export class BmoniClientService {
     return this.request({ method: 'POST', url: BmoniPaths.signProposal(proposalId), data: body });
   }
 
-  getTransactions(userId: string, smartWalletId: string): Promise<TransactionsResponse> {
-    return this.request({ method: 'GET', url: BmoniPaths.transactions(userId, smartWalletId) });
+  getTransactions(
+    userId: string,
+    smartWalletId: string,
+    params?: { page?: number; perPage?: number },
+  ): Promise<TransactionsResponse> {
+    return this.request({
+      method: 'GET',
+      url: BmoniPaths.transactions(userId, smartWalletId),
+      params,
+    });
   }
 }
 

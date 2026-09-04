@@ -63,7 +63,7 @@ transfer primitive above):
 | Phase | Status |
 |---|---|
 | 1 — Foundation (user + owner wallet + managed smart wallet) | **Done, verified against the live sandbox** — see `backend/README.md` |
-| 2 — KYC + onboarding (NGN, USD) | Not started |
+| 2 — KYC + onboarding (NGN, USD) | **Done for NGN, verified against the live sandbox; USD wired but blocked on a real device camera** — see below |
 | 3 — Transfers (QR, PayTag, deposits, NGN withdrawal) | Not started |
 | 4 — Microfinance layer (savings, loans, agent mode) | Not started |
 | 5 — Polish (split-bill, send-via-link/escrow, CAD/EUR/MXN stubs) | Not started |
@@ -78,10 +78,24 @@ see `backend/README.md` for the specifics (field names, response
 envelopes, and the fact that the sandbox is a shared, multi-tenant
 environment with global phone-number uniqueness).
 
-The Flutter app is scaffolded and wired for the same Phase 1 flow, written
-against the real `bmoni_embedded_sdk` v0.0.2 API (inspected from its
-pub.dev package, not guessed), but **has not been run** — this environment
-has no Flutter/Dart SDK installed. See `app/README.md`.
+Phase 2's NGN path was also run end-to-end against the live sandbox: the
+full KYC wizard (options, occupations, all three documents, profile PATCH,
+readiness, activation), `start-nigeria`, and wallet home (wallets,
+balances, transaction history) all round-trip successfully. The USD path
+is wired identically in the backend and Flutter wizard, but BMONI's USD
+onboarding runs a real Sumsub identity check that rejects a synthetic test
+image — completing it needs an actual photorealistic ID/selfie capture
+from a real device, which this environment can't provide. Also worth
+flagging: a deliberately mismatched name against a real BVN was **not**
+rejected by `start-nigeria` in three separate live test runs, contradicting
+the build brief's description of that check — see `backend/README.md`
+"Phase 2 findings" before treating that endpoint as a compliance control.
+
+The Flutter app is scaffolded and wired for both phases, written against
+the real `bmoni_embedded_sdk` v0.0.2 API (inspected from its pub.dev
+package, not guessed) and the backend's confirmed-live HTTP contract, but
+**has not been run** — this environment has no Flutter/Dart SDK installed.
+See `app/README.md`.
 
 ## Quickstart
 
@@ -93,6 +107,8 @@ docker-compose up -d
 npx prisma migrate dev
 npm run start:dev            # backend on :3000
 npm run sandbox:lifecycle    # re-verify Phase 1 against the live sandbox
+npm run sandbox:phase2       # re-verify Phase 2 NGN KYC + onboarding
+npm run sandbox:kyc-mismatch # the deliberate BVN/name-mismatch check
 ```
 
 ```bash

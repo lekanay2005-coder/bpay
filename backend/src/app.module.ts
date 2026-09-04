@@ -6,6 +6,8 @@ import { BmoniModule } from './bmoni/bmoni.module';
 import { UsersModule } from './users/users.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { KycModule } from './kyc/kyc.module';
+import { WalletModule } from './wallet/wallet.module';
 
 @Module({
   imports: [
@@ -15,6 +17,8 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     UsersModule,
     OnboardingModule,
     WebhooksModule,
+    KycModule,
+    WalletModule,
   ],
 })
 export class AppModule {}

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../models/app_user.dart';
 import '../../services/api_client.dart';
 import '../../services/wallet_service.dart';
-import '../wallet_home_screen.dart';
+import '../kyc/kyc_wizard_screen.dart';
 
 /// Runs steps 2-5 of the build brief's core lifecycle (section 2.1):
 /// on-device owner wallet -> owner-proof challenge -> on-device signature
@@ -129,7 +129,14 @@ class _PinAndWalletScreenState extends State<PinAndWalletScreen> {
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => WalletHomeScreen(user: widget.user, initialWallet: wallet),
+          builder: (_) => KycWizardScreen(
+            user: widget.user,
+            // `wallet.currency` is BMONI's fiat label (e.g. "NGN"), not
+            // the stablecoin code that was sent in the create request —
+            // see SmartWallet DTO doc comment on the backend.
+            currency: wallet.currency,
+            smartWalletId: wallet.id,
+          ),
         ),
       );
     } catch (e) {

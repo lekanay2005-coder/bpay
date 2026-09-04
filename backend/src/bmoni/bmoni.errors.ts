@@ -1,8 +1,13 @@
 /**
  * Typed wrapper around BMONI's error responses so callers can branch on
  * `.status` / `.bmoniMessage` instead of poking at raw axios errors.
- * Observed shape from the live sandbox: { statusCode, error, message }
- * where `message` is either a string or a string[] (class-validator style).
+ * Most observed shapes are { statusCode, error, message } where `message`
+ * is either a string or a string[] (class-validator style), but some
+ * endpoints return richer bodies with no `error` key at all — e.g.
+ * start-usa's 422 action-required response:
+ *   { kycStatus, fieldsToAction: string[], code, message, statusCode }
+ * `rawBody` preserves the full response so callers needing those extra
+ * fields (like `fieldsToAction`) aren't stuck with just the message.
  */
 export class BmoniApiError extends Error {
   constructor(
@@ -10,6 +15,7 @@ export class BmoniApiError extends Error {
     public readonly bmoniError: string | undefined,
     public readonly bmoniMessage: string | string[] | undefined,
     public readonly path: string,
+    public readonly rawBody: unknown = undefined,
   ) {
     super(
       `BMONI ${status} on ${path}: ${

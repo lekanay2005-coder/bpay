@@ -49,6 +49,30 @@ BMONI API sequence works — it does **not** stand in for the Flutter app,
 which must always go through `bmoni_embedded_sdk` for real key material.
 See the header comment in `scripts/sandbox-lifecycle.ts`.
 
+## Verifying Phase 2 against the live sandbox
+
+```bash
+npm run sandbox:phase2        # full NGN KYC wizard + rail onboarding + wallet home
+npm run sandbox:kyc-mismatch  # the deliberate BVN/name-mismatch check (see below)
+```
+
+`scripts/sandbox-lifecycle-phase2.ts` runs the real `KycService` /
+`OnboardingService` / `WalletService` through the complete NGN flow:
+KYC options/occupations, all three documents, the `PATCH kyc` profile
+fields, readiness, activation, `start-nigeria`, polling onboarding status
+to `active`, then wallets/balances/transactions. This has been run
+against the live sandbox and passes end-to-end. The document images are
+a real (but content-meaningless) PNG fixture at
+`scripts/fixtures/test-document.png` — BMONI validates that uploads are
+genuine image/PDF files, so random bytes are rejected outright.
+
+The USD rail is wired the same way (`KycController`/`OnboardingService`
+both handle it) but is **not** exercised by an automated script, because
+BMONI's USD path runs a real Sumsub identity check that the synthetic
+fixture image fails (see finding below) — completing it requires an
+actual photorealistic ID/selfie capture, which only makes sense to test
+from the real Flutter app on a device.
+
 ## Things discovered empirically that the brief didn't fully spell out
 
 BMONI's request/response shapes for a few endpoints turned out to differ
@@ -93,9 +117,98 @@ Everything else under `src/bmoni/dto/` that hasn't been exercised against
 a live response yet is commented as such — treat those shapes as
 best-effort from the brief, not confirmed.
 
+### Phase 2 findings
+
+The KYC/onboarding/wallet-home surface diverges from the brief more than
+Phase 1's did. All confirmed live on 2026-09-04 against a fresh sandbox
+user carried through the full wizard:
+
+- **`PATCH /kyc`'s real shape is not what the brief describes.** The
+  personal-info wrapper key is `personalInfo`, not `personal`; there is
+  no `compliance` wrapper (`accountPurpose` and `estimatedMonthlyVolume`
+  are top-level); address uses `streetLine1`/`streetLine2` and an ISO
+  **alpha-3** `countryCode` (`"NGA"`, not `"NG"`); employment uses
+  `employmentStatus`/`occupationCode` (not `status`/`occupation`);
+  `sourceOfFunds` is top-level, not nested under employment. There is no
+  `bvn` field on this endpoint at all — BVN is submitted via
+  `POST /onboarding/start-nigeria` instead. Getting any of this wrong
+  doesn't 400 loudly in every case — `PATCH /kyc` silently ignores/rejects
+  unknown top-level keys (`"property X should not exist"`) but nested
+  typos inside an accepted key can pass validation and just never show up
+  in `saved`, so cross-check against `kyc/readiness`'s `missing` array
+  after every patch, not just the `saved` map in the response.
+- **The three document-upload endpoints each use a different file field
+  name.** `documents/identification` and `documents/proof-of-address`
+  both expect the file under `files`; `documents/biometric` expects it
+  under `selfie`. All three reject non-image/PDF bytes outright ("not a
+  valid JPEG, PNG, or PDF") and separately reject anything under ~2KB.
+  `BmoniClientService`'s `postMultipart` takes the field name as a
+  parameter specifically because of this — don't unify it.
+- **`identificationTypes` from `GET /kyc/options` does not match what
+  `documents/identification` actually accepts.** Options lists
+  `["passport","national_id","driving_license","voter_id","tax_id"]`;
+  the upload endpoint's real enum is `["passport","drivers_license",
+  "national_id","government_id","nric","fin","other"]` (note
+  `drivers_license` vs `driving_license`, and `voter_id`/`tax_id` aren't
+  accepted at all). The Flutter KYC wizard hardcodes the upload-side enum
+  for this reason rather than trusting `kyc/options`.
+- **`kyc/activate`'s `sumsubLevelName` is always required** — BMONI
+  rejects an omitted/empty body with a 400, contradicting the brief's
+  instruction to omit it entirely for CAD/NGN. Its *valid* value set is
+  also dynamic: an activate call before any documents were submitted
+  listed 8 possible values including `"KYC via API"`; after all three
+  documents were submitted for an NGN-target profile, the valid set
+  narrowed to 4 values and `"KYC via API"` was no longer among them.
+  `"id-and-liveness"` is the value confirmed working in that
+  post-documents state. Don't hardcode a currency→level table without
+  re-confirming against a live 400 response, which echoes the current
+  valid set verbatim.
+- **`onboarding/status` is asynchronous, not synchronous with the call
+  that triggers it.** Immediately after `start-nigeria` returns 200,
+  `anchorStatus` can still read `"not_started"` (or transiently
+  `"pending"`) for a few seconds before settling to `"active"`. Both
+  `scripts/sandbox-lifecycle-phase2.ts` and the Flutter wizard poll for
+  this rather than checking once.
+- **`start-usa` performs a real Sumsub identity check and will 422 on a
+  synthetic image.** The response shape is also not the brief's bare
+  `{ workflowId }` on failure — it's
+  `{ kycStatus: "action_required", fieldsToAction: ["BAD_SELFIE",
+  "DOCUMENT_PAGE_MISSING"], code, message, statusCode: 422 }`. This is
+  the only endpoint in Phase 1-2 found so far where BMONI's error body has
+  no `error` key at all, which is why `BmoniApiError` now carries the full
+  `rawBody` alongside the parsed `error`/`message` — see
+  `OnboardingService.startUsa`'s catch block, which records this as an
+  `action_required` `RailOnboarding` row rather than losing the detail.
+- **`GET /wallets` returns a bare array**, not `{ wallets: [...] }`.
+  **`GET /balances`** returns `{ smartAccountAddress, balances: [{
+  smartWalletId, currency, balance, error }] }` — `balance` is a plain
+  decimal string (`"0"`), not a minor-unit string, so don't run it
+  through `money.util.ts`. **`GET /transactions/{walletId}`** is
+  paginated (`{ transactions, page, perPage, total, pageCount,
+  hasNextPage, hasPreviousPage }`), not a bare `{ transactions }`.
+- **A BVN/name mismatch was NOT rejected by `start-nigeria` in this
+  sandbox**, contrary to the build brief's claim that "verification
+  checks the number AND the submitted name." `npm run sandbox:kyc-mismatch`
+  registers a user named "Deliberately Mismatched", confirms via
+  `bvn-lookup` that BVN `22222222222` is on file for "Samson Jabo", then
+  calls `start-nigeria` with that BVN anyway. Across three separate runs,
+  the call returned 200 every time and `anchorStatus` settled to
+  `"active"` within a few seconds, identical to the correctly-matched
+  case — no rejection, no distinguishable "under review" hold, and no
+  synchronous or fast-async error of any kind. This does **not** mean
+  BMONI never enforces the match — it may happen later out-of-band (e.g.
+  a `kyc.action_required` webhook, which this environment has no public
+  URL to receive) — but it means **`start-nigeria` returning success is
+  not, by itself, proof that identity was verified**, and this codebase
+  should not treat it as a compliance control on its own. Flag this to
+  BMONI/product before relying on it for anything KYC-sensitive; don't
+  quietly assume the brief's description is what's actually enforced.
+
 ## Testing
 
 ```bash
-npm test                # unit tests (no network)
-npm run sandbox:lifecycle  # live integration against the BMONI sandbox
+npm test                      # unit tests (no network)
+npm run sandbox:lifecycle     # Phase 1: user + owner wallet + smart wallet
+npm run sandbox:phase2        # Phase 2: full NGN KYC wizard + onboarding + wallet home
+npm run sandbox:kyc-mismatch  # Phase 2: the deliberate BVN/name-mismatch check
 ```

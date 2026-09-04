@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import '../models/app_user.dart';
+import '../models/kyc.dart';
 import '../services/api_client.dart';
 
-/// Phase 1 stub — proves the lifecycle end to end. Balances, transaction
-/// history, and the transfer UX land in Phases 2-3.
+/// Phase 2: real balances + transaction history, fetched fresh from the
+/// backend rather than relying on a wallet object passed in at creation
+/// time. Transfers land in Phase 3.
 class WalletHomeScreen extends StatefulWidget {
   final AppUser user;
-  final SmartWallet? initialWallet;
-  const WalletHomeScreen({super.key, required this.user, this.initialWallet});
+  const WalletHomeScreen({super.key, required this.user});
 
   @override
   State<WalletHomeScreen> createState() => _WalletHomeScreenState();
@@ -15,59 +16,169 @@ class WalletHomeScreen extends StatefulWidget {
 
 class _WalletHomeScreenState extends State<WalletHomeScreen> {
   final _api = ApiClient();
-  Map<String, dynamic>? _status;
+  List<SmartWallet> _wallets = [];
+  Map<String, Balance> _balancesByWalletId = {};
+  bool _loading = true;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _loadStatus();
+    _load();
   }
 
-  Future<void> _loadStatus() async {
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
-      final status = await _api.getOnboardingStatus(widget.user.id);
-      setState(() => _status = status);
-    } catch (_) {
-      // Non-fatal for this stub screen.
+      final wallets = await _api.listWallets(widget.user.id);
+      final balances = await _api.listBalances(widget.user.id);
+      setState(() {
+        _wallets = wallets;
+        _balancesByWalletId = {for (final b in balances) b.smartWalletId: b};
+      });
+    } catch (e) {
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final wallet = widget.initialWallet;
     return Scaffold(
-      appBar: AppBar(title: Text('Hi, ${widget.user.firstName}')),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: ListView(
+      appBar: AppBar(
+        title: Text('Hi, ${widget.user.firstName}'),
+        actions: [IconButton(icon: const Icon(Icons.refresh), onPressed: _load)],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView(
+                padding: const EdgeInsets.all(24),
+                children: [
+                  Text('BMONI user: ${widget.user.bmoniUserId}',
+                      style: Theme.of(context).textTheme.bodySmall),
+                  const SizedBox(height: 16),
+                  if (_error != null)
+                    Text(_error!, style: const TextStyle(color: Colors.red)),
+                  if (_wallets.isEmpty && _error == null)
+                    const Text('No smart wallets yet.'),
+                  ..._wallets.map((w) => _WalletCard(
+                        wallet: w,
+                        balance: _balancesByWalletId[w.id],
+                        appUserId: widget.user.id,
+                      )),
+                ],
+              ),
+            ),
+    );
+  }
+}
+
+class _WalletCard extends StatelessWidget {
+  final SmartWallet wallet;
+  final Balance? balance;
+  final String appUserId;
+
+  const _WalletCard({required this.wallet, required this.balance, required this.appUserId});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('BMONI user: ${widget.user.bmoniUserId}',
-                style: Theme.of(context).textTheme.bodySmall),
-            const SizedBox(height: 24),
-            if (wallet != null)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(wallet.currency, style: Theme.of(context).textTheme.titleLarge),
-                      const SizedBox(height: 8),
-                      Text(wallet.walletAddress),
-                      const SizedBox(height: 8),
-                      Text(wallet.isActive ? 'Active' : 'Inactive'),
-                    ],
+            Text(wallet.currency, style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 4),
+            Text(wallet.walletAddress, style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 8),
+            Text(
+              balance != null ? '${balance!.balance} ${balance!.currency}' : '—',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 4),
+            Text(wallet.isActive ? 'Active' : 'Inactive'),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => TransactionHistoryScreen(
+                    appUserId: appUserId,
+                    smartWalletId: wallet.id,
+                    currency: wallet.currency,
                   ),
                 ),
-              )
-            else
-              const Text('No smart wallet loaded for this session.'),
-            const SizedBox(height: 24),
-            Text('Onboarding status', style: Theme.of(context).textTheme.titleMedium),
-            Text(_status?.toString() ?? 'Loading...'),
+              ),
+              child: const Text('View transactions'),
+            ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class TransactionHistoryScreen extends StatefulWidget {
+  final String appUserId;
+  final String smartWalletId;
+  final String currency;
+
+  const TransactionHistoryScreen({
+    super.key,
+    required this.appUserId,
+    required this.smartWalletId,
+    required this.currency,
+  });
+
+  @override
+  State<TransactionHistoryScreen> createState() => _TransactionHistoryScreenState();
+}
+
+class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
+  final _api = ApiClient();
+  List<Transaction> _transactions = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final txns = await _api.getTransactions(widget.appUserId, widget.smartWalletId);
+    if (mounted) setState(() {
+      _transactions = txns;
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('${widget.currency} transactions')),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _transactions.isEmpty
+              ? const Center(child: Text('No transactions yet.'))
+              : ListView.builder(
+                  itemCount: _transactions.length,
+                  itemBuilder: (context, i) {
+                    final t = _transactions[i];
+                    return ListTile(
+                      leading: Icon(t.direction == 'IN' ? Icons.arrow_downward : Icons.arrow_upward),
+                      title: Text('${t.amount} ${t.currency}'),
+                      subtitle: Text('${t.status} · ${t.createdAt}'),
+                    );
+                  },
+                ),
     );
   }
 }

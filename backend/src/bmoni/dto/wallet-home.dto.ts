@@ -1,16 +1,21 @@
 import { SmartWallet } from './smart-wallets.dto';
 
-export interface ListWalletsResponse {
-  wallets: SmartWallet[];
-}
+/**
+ * Confirmed live (2026-09-04): a bare array, NOT `{ wallets: [...] }` as
+ * the brief's shape suggested.
+ */
+export type ListWalletsResponse = SmartWallet[];
 
+/** Confirmed live. `balance` is a plain decimal string, not minor units — do NOT run it through money.util.ts's minor-unit helpers. `error` is set per-wallet when a balance lookup failed. */
 export interface Balance {
-  currency: string;
   smartWalletId: string;
-  amount: string; // minor units as string, per the brief — do not parse to float
+  currency: string;
+  balance: string;
+  error: string | null;
 }
 
 export interface ListBalancesResponse {
+  smartAccountAddress: string;
   balances: Balance[];
 }
 
@@ -120,6 +125,13 @@ export interface Transaction {
   [key: string]: unknown;
 }
 
+/** Confirmed live: paginated, not a bare `{ transactions }` array. */
 export interface TransactionsResponse {
   transactions: Transaction[];
+  page: number;
+  perPage: number;
+  total: number;
+  pageCount: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
 }

@@ -16,7 +16,9 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
-    "sandbox:lifecycle": "ts-node -r tsconfig-paths/register scripts/sandbox-lifecycle.ts"
+    "sandbox:lifecycle": "ts-node -r tsconfig-paths/register scripts/sandbox-lifecycle.ts",
+    "sandbox:phase2": "ts-node -r tsconfig-paths/register scripts/sandbox-lifecycle-phase2.ts",
+    "sandbox:kyc-mismatch": "ts-node -r tsconfig-paths/register scripts/kyc-bvn-mismatch-check.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.0",
@@ -39,6 +41,7 @@
     "@nestjs/testing": "^10.4.0",
     "@types/express": "^4.17.21",
     "@types/jest": "^29.5.13",
+    "@types/multer": "^1.4.12",
     "@types/node": "^20.16.10",
     "jest": "^29.7.0",
     "prisma": "^5.20.0",

@@ -1,9 +1,13 @@
 // PayFlex app database schema.
 //
-// Phase 1 scope only: local user record (mirroring the BMONI user + owner
-// wallet), smart wallets provisioned for that user, and raw webhook events.
-// Later phases add PayTag directory, savings goals, loans, split bills, and
-// escrow tables — do not add them here ahead of the phase that needs them.
+// Phase 1: local user record (mirroring the BMONI user + owner wallet),
+// smart wallets provisioned for that user, and raw webhook events.
+// Phase 2 adds KycProfile (local mirror of KYC submission progress — the
+// actual documents/decisions live in BMONI, this just tracks what we've
+// submitted so the wizard UI can resume) and RailOnboarding (per-currency
+// onboarding state for NGN/USD). Later phases add PayTag directory,
+// savings goals, loans, split bills, and escrow tables — do not add them
+// here ahead of the phase that needs them.
 
 generator client {
   provider = "prisma-client-js"
@@ -30,8 +34,10 @@ model AppUser {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  smartWallets  SmartWallet[]
-  webhookEvents WebhookEvent[]
+  smartWallets    SmartWallet[]
+  webhookEvents   WebhookEvent[]
+  kycProfile      KycProfile?
+  railOnboardings RailOnboarding[]
 }
 
 model SmartWallet {
@@ -61,4 +67,55 @@ model WebhookEvent {
   appUser     AppUser?  @relation(fields: [appUserId], references: [id])
   receivedAt  DateTime  @default(now())
   processedAt DateTime?
+}
+
+// Local mirror of KYC submission progress. BMONI is the source of truth
+// for whether documents/decisions are actually valid (see kyc/readiness,
+// kyc/usd-readiness) — this table exists so the wizard UI can resume
+// where a user left off without re-querying BMONI on every screen, and so
+// we can record which currencies have actually been through
+// POST /kyc/activate (KYC data is shared across currencies, but
+// activation is per rail — see build brief section 2.2).
+model KycProfile {
+  id        String  @id @default(uuid())
+  appUserId String  @unique
+  appUser   AppUser @relation(fields: [appUserId], references: [id])
+
+  personalInfo           Json?
+  address                Json?
+  employment             Json?
+  sourceOfFunds          String?
+  accountPurpose         String?
+  estimatedMonthlyVolume Int?
+
+  identificationSubmittedAt DateTime?
+  proofOfAddressSubmittedAt DateTime?
+  biometricSubmittedAt      DateTime?
+  readyAt                   DateTime?
+
+  // Currencies for which POST /kyc/activate has succeeded.
+  activatedCurrencies String[] @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Per-currency rail onboarding state (NGN/USD in Phase 2; CAD/EUR/MXN
+// stubs land in Phase 5). `status` is our own coarse label, not a literal
+// copy of BMONI's per-provider onboarding/status fields (anchorStatus,
+// bridgeStatus, ...) — see OnboardingService for the mapping.
+model RailOnboarding {
+  id        String  @id @default(uuid())
+  appUserId String
+  appUser   AppUser @relation(fields: [appUserId], references: [id])
+
+  currency   String
+  status     String
+  workflowId String?
+  metadata   Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([appUserId, currency])
 }
