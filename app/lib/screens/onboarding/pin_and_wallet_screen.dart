@@ -2,6 +2,12 @@ import 'package:flutter/material.dart';
 import '../../models/app_user.dart';
 import '../../services/api_client.dart';
 import '../../services/wallet_service.dart';
+import '../../theme/payflex_tokens.dart';
+import '../../theme/payflex_theme.dart';
+import '../../widgets/pf_balance_card.dart';
+import '../../widgets/pf_buttons.dart';
+import '../../widgets/pf_motion.dart';
+import '../../widgets/pf_states.dart';
 import '../kyc/kyc_wizard_screen.dart';
 
 /// Runs steps 2-5 of the build brief's core lifecycle (section 2.1):
@@ -9,6 +15,10 @@ import '../kyc/kyc_wizard_screen.dart';
 /// -> create-managed smart wallet. Everything that touches key material
 /// goes through WalletService (bmoni_embedded_sdk); everything that
 /// touches BMONI goes through ApiClient (the backend's BmoniClient).
+///
+/// Rendered as a navy "secure your wallet" moment (design brief §1) —
+/// the part of the flow closest to the key material, so it gets the
+/// wallet treatment rather than the paperwork treatment.
 class PinAndWalletScreen extends StatefulWidget {
   final AppUser user;
   const PinAndWalletScreen({super.key, required this.user});
@@ -29,6 +39,12 @@ class _PinAndWalletScreenState extends State<PinAndWalletScreen> {
   String? _selectedCurrency;
   String? _ownerAddress;
   String? _pin;
+
+  @override
+  void dispose() {
+    _pinController.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -99,8 +115,8 @@ class _PinAndWalletScreenState extends State<PinAndWalletScreen> {
       final currencies = await _api.getSupportedCurrencies();
       setState(() {
         _currencies = currencies;
-        // NGN/USD are this build's priority rails (see build brief section
-        // 2.3) — default to the NGN stablecoin when available.
+        // NGN/USD are this build's priority rails (build brief §2.3) —
+        // default to the NGN stablecoin when available.
         _selectedCurrency = currencies.contains('CNGN') ? 'CNGN' : currencies.first;
       });
     } catch (e) {
@@ -148,79 +164,289 @@ class _PinAndWalletScreenState extends State<PinAndWalletScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Secure your wallet')),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: _buildStep(),
+    return Theme(
+      data: PayFlexTheme.dark,
+      child: Scaffold(
+        backgroundColor: PfColors.navy,
+        appBar: AppBar(
+          title: const Text('Secure your wallet'),
+          backgroundColor: PfColors.navy,
+        ),
+        body: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Padding(
+                padding: const EdgeInsets.all(PfSpace.xl),
+                child: _buildStep(),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
+
+  String get _stepTitle => switch (_step) {
+        _Step.setPin => 'Secure your wallet',
+        _Step.provisionWallet => 'Generating your key',
+        _Step.chooseCurrency => 'Choose your first wallet',
+        _Step.done => 'Done',
+      };
+
+  String get _stepSubtitle => switch (_step) {
+        _Step.setPin =>
+          'A 6-digit PIN gates every signature on this device. PayFlex never '
+              'stores it — only a verifiable digest lives in secure storage.',
+        _Step.provisionWallet =>
+          'Creating an on-device EVM owner key. It never leaves this phone.',
+        _Step.chooseCurrency => 'Your wallet settles on BMONI smart-wallet rails.',
+        _Step.done => '',
+      };
 
   Widget _buildStep() {
     if (_error != null) {
       return Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(_error!, style: const TextStyle(color: Colors.red)),
+          PfInlineError(message: _error!, onRetry: () => setState(() => _error = null)),
           const SizedBox(height: 16),
-          FilledButton(onPressed: () => setState(() => _error = null), child: const Text('Retry')),
         ],
       );
     }
-    if (_busy) {
-      return const Center(child: CircularProgressIndicator());
+    if (_busy && _step == _Step.provisionWallet) {
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: const [
+          PfBrandedLoader(size: 64),
+          SizedBox(height: 22),
+          Text(
+            'Generating your on-device key…',
+            style: TextStyle(color: PfColors.onNavyMuted, fontSize: 14),
+          ),
+        ],
+      );
     }
-    switch (_step) {
-      case _Step.setPin:
-        return Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          _stepTitle,
+          style: Theme.of(context).textTheme.headlineSmall,
+        ),
+        const SizedBox(height: 6),
+        Text(
+          _stepSubtitle,
+          style: const TextStyle(
+            color: PfColors.onNavyMuted,
+            fontSize: 13.5,
+            height: 1.45,
+          ),
+        ),
+        const SizedBox(height: 26),
+        switch (_step) {
+          _Step.setPin => _pinStep(),
+          _Step.chooseCurrency => _currencyStep(),
+          _ => const SizedBox.shrink(),
+        },
+      ],
+    );
+  }
+
+  Widget _pinStep() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: _pinController,
+          obscureText: true,
+          keyboardType: TextInputType.number,
+          maxLength: 6,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: PfColors.onNavy,
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 10,
+          ),
+          decoration: InputDecoration(
+            labelText: 'PIN',
+            counterText: '',
+            filled: true,
+            fillColor: PfColors.navyRaised2,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
           children: [
-            const Text('Set a 6-digit PIN to protect your wallet on this device.'),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _pinController,
-              obscureText: true,
-              keyboardType: TextInputType.number,
-              maxLength: 6,
-              decoration: const InputDecoration(labelText: 'PIN'),
-            ),
-            FilledButton(onPressed: _submitPin, child: const Text('Set PIN')),
-          ],
-        );
-      case _Step.provisionWallet:
-        return const Center(child: CircularProgressIndicator());
-      case _Step.chooseCurrency:
-        return Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('Owner address: $_ownerAddress', style: Theme.of(context).textTheme.bodySmall),
-            const SizedBox(height: 16),
-            const Text('Choose your first wallet currency:'),
-            if (_currencies.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else
-              DropdownButton<String>(
-                value: _selectedCurrency,
-                items: _currencies
-                    .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                    .toList(),
-                onChanged: (v) => setState(() => _selectedCurrency = v),
+            const Icon(Icons.shield_outlined, size: 14, color: PfColors.onNavyFaint),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Used to sign every transfer — it never leaves this device.',
+                style: TextStyle(
+                  color: PfColors.onNavyFaint,
+                  fontSize: 11.5,
+                  height: 1.4,
+                ),
               ),
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: _currencies.isEmpty ? null : _createSmartWallet,
-              child: const Text('Create smart wallet'),
             ),
           ],
-        );
-      case _Step.done:
-        return const SizedBox.shrink();
-    }
+        ),
+        const SizedBox(height: 20),
+        PfPrimaryButton(
+          label: 'Set PIN',
+          icon: Icons.lock_outline_rounded,
+          busy: _busy,
+          onPressed: _busy ? null : _submitPin,
+        ),
+      ],
+    );
+  }
+
+  Widget _currencyStep() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_ownerAddress != null)
+          PfPanel(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            radius: PfRadius.sm,
+            showShadow: false,
+            child: Row(
+              children: [
+                const Text(
+                  'Owner address',
+                  style: TextStyle(color: PfColors.onNavyMuted, fontSize: 12.5),
+                ),
+                const Spacer(),
+                Flexible(
+                  child: SelectableText(
+                    _ownerAddress!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: PfColors.onNavy,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        const SizedBox(height: 18),
+        if (_currencies.isEmpty)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: PfBrandedLoader(size: 40),
+            ),
+          )
+        else
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ..._currencies.map((c) {
+                final selected = _selectedCurrency == c;
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(PfRadius.md),
+                    border: Border.all(
+                      color: selected ? PfColors.emerald : PfColors.navyBorder,
+                      width: selected ? 1.5 : 1,
+                    ),
+                    color: selected ? PfColors.emerald.withValues(alpha: 0.08) : PfColors.navyRaised,
+                  ),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(PfRadius.md),
+                    onTap: () => setState(() => _selectedCurrency = c),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 12,
+                            height: 12,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: selected ? PfColors.emerald : PfColors.onNavyFaint,
+                                width: 2,
+                              ),
+                            ),
+                            child: selected
+                                ? Center(
+                                    child: Container(
+                                      width: 6,
+                                      height: 6,
+                                      decoration: const BoxDecoration(
+                                        color: PfColors.emerald,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                  )
+                                : null,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  c,
+                                  style: const TextStyle(
+                                    color: PfColors.onNavy,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.4,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  _friendlyCurrency(c),
+                                  style: const TextStyle(
+                                    color: PfColors.onNavyMuted,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (selected)
+                            const Icon(
+                              Icons.check_circle_rounded,
+                              color: PfColors.emerald,
+                              size: 20,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
+              const SizedBox(height: 14),
+              PfPrimaryButton(
+                label: 'Create wallet',
+                icon: Icons.arrow_forward_rounded,
+                busy: _busy,
+                onPressed: _currencies.isEmpty ? null : _createSmartWallet,
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  String _friendlyCurrency(String stablecoin) {
+    return switch (stablecoin) {
+      'CNGN' => 'Nigerian naira · NGN',
+      'USDB' => 'US dollar · USD',
+      'CADC' => 'Canadian dollar · CAD',
+      'EURe' => 'Euro · EUR',
+      'MEXe' => 'Mexican peso · MXN',
+      _ => stablecoin,
+    };
   }
 }

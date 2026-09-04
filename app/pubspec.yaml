@@ -40,3 +40,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    # The approved PayFlex brand mark (QR-corners + flowing arrow on the
+    # logo's navy container). Full design-token spec: docs/BUILD_PROMPT.md
+    # §9 (UI/UX & Motion Design Brief v2).
+    - assets/brand/

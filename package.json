@@ -1,0 +1,13 @@
+{
+  "name": "payflex",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PayFlex monorepo — Flutter mobile app (app/) + NestJS orchestration backend (backend/). The backend is the only component with a runnable dev server; root scripts delegate to it so a single `dev` command works from the repo root.",
+  "scripts": {
+    "postinstall": "npm --prefix backend install",
+    "dev": "npm --prefix backend run start:dev",
+    "build": "npm --prefix backend run build",
+    "start": "npm --prefix backend run start:prod",
+    "typecheck": "npm --prefix backend exec tsc -- --noEmit -p tsconfig.json"
+  }
+}

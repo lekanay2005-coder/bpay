@@ -65,6 +65,55 @@ flutter pub get
 flutter run --dart-define=BACKEND_BASE_URL=http://10.0.2.2:3000
 ```
 
+## Design system (UI/UX & Motion Design Brief v2)
+
+The visual layer implements `docs/BUILD_PROMPT.md` §9 — "premium private
+bank meets modern fintech," built off the approved logo (QR-corners +
+flowing-arrow mark, blue→emerald gradient, deep navy base).
+
+- **Design tokens** — `lib/theme/payflex_tokens.dart` is the only place hex
+  codes, radii (12/16/24), spacing, motion durations/curves and shadows
+  live. `lib/theme/payflex_theme.dart` builds both fully-designed light
+  (off-white forms) and dark (navy wallet chrome) themes; default launch
+  mode is dark, toggleable in Settings. No colored shadows, no glow: every
+  shadow is a small, low-opacity, neutral elevation (`PfShadow`).
+- **Signature motif** — `lib/widgets/pf_mark.dart` authors the flowing
+  ribbon + arrowhead as vector geometry (a code-drawn stand-in for the logo
+  PNG so it can draw itself). Used as the branded loader
+  (`pf_motion.dart`), the transfer-confirmation draw-in and success mark
+  (`pf_flow.dart`), the flat wallet-home watermark, and thin accent lines.
+  The approved logo PNG itself ships as `assets/brand/payflex_logo.png`
+  (registered in `pubspec.yaml`) for splash/header/receipt lockups.
+- **Component library** — `pf_balance_card.dart` (gradient balance card
+  with the once-per-session count-up reveal), `pf_buttons.dart` (gradient
+  primary + quiet secondary), `pf_flow.dart` (confirmation animation +
+  official `PfReceiptScreen` + generic success dialog), `pf_states.dart`
+  (designed empty/error states, status chips, progress bars, split-bill
+  progress ring, step headers), `pf_motion.dart`.
+- **Money formatting** — `lib/utils/money.dart` is the single shared
+  formatter (symbol, thousands separators, consistent decimals);
+  `lib/utils/format.dart` handles timestamps/ids. No screen formats money
+  inline.
+- **Signature animations** (brief §2, all reusable): balance count-up on
+  wallet-home load; ribbon draw-in + settle on every transfer payoff
+  (Send, QR Pay, savings, loans, agent, split-bill, send-via-link); QR
+  scanner→confirm shared-element morph on the QR frame (Hero tag
+  `pf-qr-frame`); one consistent fade-up route transition app-wide;
+  branded ribbon loader everywhere a spinner used to be; flat gradient
+  progress rings on split bills. No glow, no confetti, no blocking
+  animations.
+- **Business-touch screens** (brief §3): receipts on every money flow,
+  designed empty/error states app-wide, step-by-step onboarding/KYC
+  progress, and a real `SettingsScreen` (account tier + verification badge
+  from live onboarding status, appearance toggle, security posture,
+  support, sign out).
+
+> **Design layer not yet run.** Same caveat as the rest of the app — this
+> environment has no Flutter/Dart SDK, so none of the above has been
+> through `flutter analyze` or a device run. The palette/geometry/motion
+> code is written against Flutter >=3.29 APIs only; run `flutter analyze`
+> and walk the flows on a device before trusting the look.
+
 ## Architecture
 
 - The app **never** calls BMONI directly. Every network call goes through

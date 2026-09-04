@@ -178,7 +178,10 @@ The Flutter app is scaffolded and wired for all five phases, written
 against the real `bmoni_embedded_sdk` v0.0.2 API (inspected from its
 pub.dev package, not guessed) and the backend's confirmed-live HTTP
 contract, but **has not been run** — this environment has no Flutter/Dart
-SDK installed. See `app/README.md`.
+SDK installed. See `app/README.md`. On top of the five phases, the app
+now carries the **UI/UX & Motion Design Brief v2** visual layer
+(`docs/BUILD_PROMPT.md` §9 — design tokens, brand motif animations,
+component library, receipts, settings) — also not yet run, same caveat.
 
 ## Quickstart
 
